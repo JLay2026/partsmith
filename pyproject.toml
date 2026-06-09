@@ -1,6 +1,6 @@
 [project]
 name = "partsmith"
-version = "0.2.1"
+version = "0.2.2"
 description = "Minimal headless parametric-CAD server (build123d + REST + MCP)"
 license = { text = "MIT" }
 authors = [

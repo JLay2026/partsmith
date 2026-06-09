@@ -36,6 +36,15 @@ v0.2.1:
 - See entrypoint.sh for the matching uvicorn --proxy-headers fix
   that prevents the scheme-downgrade issue (http:// in redirects when
   behind Caddy).
+
+v0.2.2:
+- Disables FastMCP's DNS rebinding protection on the /mcp transport.
+  Default rejects any Host header that isn't localhost/127.0.0.1 with
+  `421 Misdirected Request`. partsmith's threat model puts everything
+  on the perimeter (SECURITY.md); /mcp is for AI agents not browsers,
+  so DNS rebinding is not in scope. To re-enable, override
+  _mcp_server.settings.transport_security with a populated
+  TransportSecuritySettings before streamable_http_app() is called.
 """
 
 from __future__ import annotations
@@ -49,6 +58,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -146,12 +156,13 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 # propagate to apps mounted via `app.mount()`, so we have to:
 #   1. Build the MCP server + engine first
 #   2. Set streamable_http_path = "/" so the mounted URL is clean
-#   3. Call streamable_http_app() to lazily init the session manager
-#   4. Wire session_manager.run() into FastAPI's lifespan kwarg
-#   5. Construct the FastAPI app with that lifespan
-#   6. Mount the MCP sub-app
+#   3. Disable DNS rebinding protection (v0.2.2 — see module docstring)
+#   4. Call streamable_http_app() to lazily init the session manager
+#   5. Wire session_manager.run() into FastAPI's lifespan kwarg
+#   6. Construct the FastAPI app with that lifespan
+#   7. Mount the MCP sub-app
 #
-# Without step 4 every MCP request crashes with
+# Without step 5 every MCP request crashes with
 # `RuntimeError: Task group is not initialized. Make sure to use run().`
 
 engine = CADEngine(workspace=WORKSPACE)
@@ -161,6 +172,15 @@ _mcp_server = build_mcp(engine, WORKSPACE)
 # point "/mcp" on FastAPI, that produces the double-prefixed
 # "/mcp/mcp/". Override to "/" so the public URL is just "/mcp/".
 _mcp_server.settings.streamable_http_path = "/"
+
+# v0.2.2: disable DNS rebinding protection. Without this, FastMCP
+# rejects any Host header that isn't localhost/127.0.0.1 with `421
+# Misdirected Request`. Our threat model is perimeter-based
+# (SECURITY.md) and /mcp is for AI agents not browsers, so DNS
+# rebinding is not in scope.
+_mcp_server.settings.transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,
+)
 
 # Calling streamable_http_app() also lazily creates session_manager.
 _mcp_asgi_app = _mcp_server.streamable_http_app()
