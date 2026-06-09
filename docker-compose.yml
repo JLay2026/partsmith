@@ -6,12 +6,14 @@
 # authentication, so direct LAN exposure is unsafe. For network access,
 # put an authenticating reverse proxy in front of it.
 #
-# v0.1: dropped the bridge default network for an `internal: true` net.
-# Container has no outbound internet path; the host still reaches it
-# via the published port (docker-proxy intercepts on the loopback).
-# This removes the exfiltration path that exec()'d build123d code
-# would otherwise have. Cuts off the only-legitimate-outbound use
-# case partsmith has (none) at the cost of zero functionality.
+# v0.1.2: removed `internal: true` from partsmith-net. The flag
+# blocks container egress (which we wanted) but on some Docker
+# versions also breaks port publishing through docker-proxy,
+# making the published port unreachable from the host. The named
+# bridge network is kept for cosmetic isolation but no longer
+# blocks outbound. Outbound blocking will be reintroduced in v0.2
+# via host-level nftables DROP rules on this subnet, which is
+# Docker-version-portable and doesn't break port mapping.
 
 services:
   partsmith:
@@ -47,4 +49,3 @@ services:
 networks:
   partsmith-net:
     driver: bridge
-    internal: true
