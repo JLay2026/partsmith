@@ -13,6 +13,10 @@ v0.1 hardening:
 - Pydantic `Field` pattern validation on `name` blocks path traversal
 - Custom middleware rejects request bodies over MAX_REQUEST_BYTES
 - All model names path-validated again at engine.export() boundary
+
+v0.1.3:
+- All disk-write paths catch OSError and surface meaningful 500s
+  (was: bare "Internal Server Error" on permission/write failure)
 """
 
 from __future__ import annotations
@@ -55,6 +59,24 @@ def _validate_name(name: str) -> str:
     if not _NAME_RE.match(name):
         raise HTTPException(400, f"Invalid name: must match {NAME_PATTERN}")
     return name
+
+
+def _safe_write(path: Path, data: bytes, context: str) -> None:
+    """Write bytes; surface OSError as a meaningful 500 instead of bare 'Internal Server Error'.
+
+    The most common cause in practice is bind-mount perm misalignment:
+    the host-side workspace/ or renders/ dir is owned by root but the
+    container runs as uid 1000. See README "First-time deploy".
+    """
+    try:
+        path.write_bytes(data)
+    except OSError as e:
+        raise HTTPException(
+            500,
+            f"{context} write failed: {e}. "
+            f"Check that {path.parent} is writable by uid 1000 "
+            f"(the container user). See README 'First-time deploy'.",
+        )
 
 
 # ── Middleware ───────────────────────────────────────────
@@ -132,6 +154,12 @@ def create_model(req: CreateModelRequest):
                 preview_path = RENDERS / f"{req.name}_preview.png"
                 preview_path.write_bytes(png)
                 result["preview_path"] = str(preview_path)
+            except OSError as e:
+                # Most likely: bind-mount perm mismatch on /renders
+                result["render_error"] = (
+                    f"preview write failed: {e}. "
+                    f"Check that {RENDERS} is writable by uid 1000."
+                )
             except Exception as e:
                 result["render_error"] = str(e)
     return result
@@ -162,7 +190,7 @@ def render_3d_endpoint(req: RenderRequest):
         raise HTTPException(404, f"No model '{req.name or 'active'}' found")
     png = render_3d(state.shape, view=req.view)
     path = RENDERS / f"{state.name}_3d_{req.view}.png"
-    path.write_bytes(png)
+    _safe_write(path, png, "3D render")
     return {
         "path": str(path),
         "view": req.view,
@@ -177,7 +205,7 @@ def render_2d_endpoint(req: RenderRequest):
         raise HTTPException(404, f"No model '{req.name or 'active'}' found")
     png = render_2d(state.shape, view=req.view, with_dimensions=req.with_dimensions)
     path = RENDERS / f"{state.name}_2d_{req.view}.png"
-    path.write_bytes(png)
+    _safe_write(path, png, "2D render")
     return {
         "path": str(path),
         "view": req.view,
@@ -192,7 +220,7 @@ def render_multiview_endpoint(req: RenderRequest):
         raise HTTPException(404, f"No model '{req.name or 'active'}' found")
     png = render_multiview(state.shape)
     path = RENDERS / f"{state.name}_multiview.png"
-    path.write_bytes(png)
+    _safe_write(path, png, "multiview render")
     return {
         "path": str(path),
         "base64": base64.b64encode(png).decode("ascii"),
@@ -208,15 +236,15 @@ def render_all_endpoint(req: RenderRequest):
     for view in ("front", "right", "top"):
         png = render_2d(state.shape, view=view)
         p = RENDERS / f"{state.name}_2d_{view}.png"
-        p.write_bytes(png)
+        _safe_write(p, png, f"2D {view} render")
         out[f"2d_{view}"] = str(p)
     png = render_3d(state.shape, view="iso")
     p = RENDERS / f"{state.name}_3d_iso.png"
-    p.write_bytes(png)
+    _safe_write(p, png, "3D iso render")
     out["3d_iso"] = str(p)
     png = render_multiview(state.shape)
     p = RENDERS / f"{state.name}_multiview.png"
-    p.write_bytes(png)
+    _safe_write(p, png, "multiview render")
     out["multiview"] = str(p)
     return out
 
@@ -229,6 +257,15 @@ def export_model(req: ExportRequest):
         path = engine.export(req.name, req.format)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(400, str(e))
+    except OSError as e:
+        # build123d's exporter (or our final relative_to check) hit a
+        # filesystem permission/space issue. Bind-mount perm misalignment
+        # is the most common cause.
+        raise HTTPException(
+            500,
+            f"Export write failed: {e}. "
+            f"Check that {engine.workspace} is writable by uid 1000.",
+        )
     return FileResponse(
         path,
         filename=path.name,
