@@ -8,18 +8,25 @@ existing build123d-MCP clients (notably the cad-agent-shim pattern),
 so wiring is drop-in compatible.
 
 This server does NO authentication. See SECURITY.md.
+
+v0.1 hardening:
+- Pydantic `Field` pattern validation on `name` blocks path traversal
+- Custom middleware rejects request bodies over MAX_REQUEST_BYTES
+- All model names path-validated again at engine.export() boundary
 """
 
 from __future__ import annotations
 
 import base64
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from .cad_engine import CADEngine
@@ -32,32 +39,76 @@ RENDERS = Path(os.environ.get("PARTSMITH_RENDERS", "/renders"))
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 RENDERS.mkdir(parents=True, exist_ok=True)
 
+# v0.1: reject request bodies above this size before they ever touch
+# the engine. 1 MiB is plenty for build123d code; legitimate models
+# rarely exceed a few KB. Tune via PARTSMITH_MAX_BODY_BYTES.
+MAX_REQUEST_BYTES = int(os.environ.get("PARTSMITH_MAX_BODY_BYTES", str(1 * 1024 * 1024)))
+
+# v0.1: model name pattern — alphanumeric, dash, underscore only, 1-64 chars.
+# Prevents path traversal in engine.export() and keeps filenames sane.
+NAME_PATTERN = r"^[a-zA-Z0-9_-]{1,64}$"
+_NAME_RE = re.compile(NAME_PATTERN)
+
+
+def _validate_name(name: str) -> str:
+    """Belt-and-braces name validation for path params not covered by Pydantic."""
+    if not _NAME_RE.match(name):
+        raise HTTPException(400, f"Invalid name: must match {NAME_PATTERN}")
+    return name
+
+
+# ── Middleware ───────────────────────────────────────────
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose Content-Length exceeds MAX_REQUEST_BYTES."""
+
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                size = int(content_length)
+            except ValueError:
+                size = 0
+            if size > MAX_REQUEST_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": (
+                            f"Request body {size} bytes exceeds limit "
+                            f"of {MAX_REQUEST_BYTES} bytes"
+                        )
+                    },
+                )
+        return await call_next(request)
+
+
 app = FastAPI(title="partsmith", version=__version__)
+app.add_middleware(BodySizeLimitMiddleware)
 engine = CADEngine(workspace=WORKSPACE)
 
 
 # ── Request schemas ──────────────────────────────────
 
 class CreateModelRequest(BaseModel):
-    code: str
-    name: str = "default"
+    code: str = Field(..., max_length=MAX_REQUEST_BYTES)
+    name: str = Field("default", pattern=NAME_PATTERN, max_length=64)
 
 
 class RenderRequest(BaseModel):
-    name: Optional[str] = None
-    view: str = "iso"
+    name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
+    view: str = Field("iso", pattern=r"^[a-z_]{1,16}$")
     with_dimensions: bool = True
     with_hidden: bool = True  # accepted for API compat; not used in v0
 
 
 class ExportRequest(BaseModel):
-    name: Optional[str] = None
-    format: str = "stl"
+    name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
+    format: str = Field("stl", pattern=r"^(stl|step|3mf)$")
 
 
 class PrintabilityRequest(BaseModel):
-    name: Optional[str] = None
-    min_wall_thickness: float = 0.8
+    name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
+    min_wall_thickness: float = Field(0.8, ge=0.0, le=100.0)
 
 
 # ── Health ───────────────────────────────────────────────
@@ -98,10 +149,11 @@ def list_models():
 
 @app.get("/model/{name}/measure")
 def measure_model(name: str = "default"):
+    _validate_name(name)
     return engine.measure(name)
 
 
-# ── Rendering ────────────────────────────────────────────
+# ── Rendering ─────────────────────────────────────────────
 
 @app.post("/render/3d")
 def render_3d_endpoint(req: RenderRequest):
@@ -184,7 +236,7 @@ def export_model(req: ExportRequest):
     )
 
 
-# ── Printability ────────────────────────────────────────────
+# ── Printability ─────────────────────────────────────────────
 
 @app.post("/analyze/printability")
 def analyze_printability_endpoint(req: PrintabilityRequest):

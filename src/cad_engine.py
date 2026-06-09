@@ -14,9 +14,16 @@ import io
 import sys
 import time
 import traceback
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+
+# v0.1: bound the in-memory model registry to prevent unbounded growth.
+# 32 is plenty for batch CAD authoring; LRU eviction discards the
+# oldest-touched entries first.
+MAX_MODELS = 32
 
 
 @dataclass
@@ -59,12 +66,15 @@ class ModelState:
 
 
 class CADEngine:
-    """In-memory model registry + build123d code executor."""
+    """In-memory model registry + build123d code executor.
+
+    Models are kept in an LRU OrderedDict bounded by ``MAX_MODELS``.
+    """
 
     def __init__(self, workspace: Path = Path("/workspace")):
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
-        self.models: dict[str, ModelState] = {}
+        self.models: OrderedDict[str, ModelState] = OrderedDict()
         self.active: Optional[str] = None
 
     def execute_code(self, code: str, name: str = "default") -> dict:
@@ -99,6 +109,12 @@ class CADEngine:
             if shape is not None:
                 state = ModelState(name=name, code=code, shape=shape)
                 self.models[name] = state
+                self.models.move_to_end(name)  # touch -> most-recently-used
+                # LRU eviction
+                while len(self.models) > MAX_MODELS:
+                    evicted_name, _ = self.models.popitem(last=False)
+                    if self.active == evicted_name:
+                        self.active = None
                 self.active = name
                 result["success"] = True
                 result["geometry"] = state.to_summary()["geometry"]
@@ -135,7 +151,13 @@ class CADEngine:
 
     def get(self, name: Optional[str] = None) -> Optional[ModelState]:
         name = name or self.active
-        return self.models.get(name) if name else None
+        if not name:
+            return None
+        state = self.models.get(name)
+        if state is not None:
+            # Touch on access so frequently-used models don't get evicted
+            self.models.move_to_end(name)
+        return state
 
     def list_all(self) -> list[dict]:
         return [
@@ -183,7 +205,20 @@ class CADEngine:
         if state is None or state.shape is None:
             raise ValueError(f"No model '{name or 'active'}' available")
 
-        path = self.workspace / f"{state.name}.{format}"
+        # Defense-in-depth: even though server.py validates `name` at the
+        # request layer, refuse anything that could escape the workspace.
+        # state.name comes from the validated request so this is belt+braces.
+        safe_name = Path(state.name).name  # strips any leading dirs
+        if safe_name != state.name or not safe_name:
+            raise ValueError(f"Unsafe model name: {state.name!r}")
+
+        path = self.workspace / f"{safe_name}.{format}"
+        # Final guard: resolved path must stay under workspace
+        try:
+            path.resolve().relative_to(self.workspace.resolve())
+        except ValueError:
+            raise ValueError(f"Export path escapes workspace: {path}")
+
         if format == "stl":
             from build123d import export_stl
             export_stl(state.shape, str(path))

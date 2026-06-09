@@ -4,8 +4,9 @@
 Headless renderer.
 
 3D and 2D views via matplotlib's Agg backend. No Xvfb, no VTK, no
-OSMesa — works in any vanilla container. Renders are utilitarian
-(intended for AI agents verifying geometry), not photorealistic.
+OSMesa — works in any vanilla container. 3D renders use per-face
+Lambertian shading (computed from mesh.face_normals) so geometry has
+real depth cues; not photorealistic, but readable.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import trimesh  # noqa: E402
 from matplotlib.collections import PolyCollection  # noqa: E402
+from matplotlib.colors import to_rgb  # noqa: E402
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
 
@@ -47,6 +49,42 @@ VIEW_PROJECTIONS_2D = {
     "top":    ((0, 1), (+1, +1), "X (mm)", "Y (mm)"),
     "bottom": ((0, 1), (+1, -1), "X (mm)", "Y (mm)"),
 }
+
+# Default 3D look: muted blue-grey body, dark edges, subtle ambient
+DEFAULT_BASE_COLOR = "#9bb0c9"
+DEFAULT_EDGE_COLOR = "#3a4a5e"
+# Light from upper-right-front; normalized below.
+DEFAULT_LIGHT_DIR = np.array([0.5, -0.3, 0.85])
+DEFAULT_AMBIENT = 0.30  # 30% floor so back-facing tris aren't black
+
+
+def _shade_faces(
+    mesh: trimesh.Trimesh,
+    base_color: str = DEFAULT_BASE_COLOR,
+    light_dir: np.ndarray = DEFAULT_LIGHT_DIR,
+    ambient: float = DEFAULT_AMBIENT,
+) -> np.ndarray:
+    """
+    Per-face Lambertian shading.
+
+    Returns an (N, 4) RGBA array suitable for Poly3DCollection's
+    facecolors argument. NaN normals (degenerate faces) fall back to
+    ambient-only color so the renderer doesn't error on bad geometry.
+    """
+    light = light_dir / np.linalg.norm(light_dir)
+    normals = mesh.face_normals
+
+    # Safe dot product — replace NaN normals with zero contribution
+    nan_mask = np.isnan(normals).any(axis=1)
+    safe_normals = np.where(nan_mask[:, None], 0.0, normals)
+    intensity = np.clip(safe_normals @ light, 0.0, 1.0)
+    intensity = ambient + (1.0 - ambient) * intensity
+
+    base_rgb = np.array(to_rgb(base_color))
+    face_rgb = intensity[:, None] * base_rgb[None, :]
+    # Constant alpha; 1.0 looks crisper than the old 0.85
+    alpha = np.full((len(face_rgb), 1), 1.0)
+    return np.hstack([face_rgb, alpha])
 
 
 def _shape_to_trimesh(shape: Any) -> trimesh.Trimesh:
@@ -76,24 +114,17 @@ def _fig_to_png(fig) -> bytes:
     return buf.getvalue()
 
 
-def render_3d(shape: Any, view: str = "iso", size: tuple[int, int] = (800, 600)) -> bytes:
-    """Render a 3D view of a build123d Shape. Returns PNG bytes."""
-    mesh = _shape_to_trimesh(shape)
-    elev, azim = VIEW_ANGLES_3D.get(view, VIEW_ANGLES_3D["iso"])
-
-    fig = plt.figure(figsize=(size[0] / 100, size[1] / 100), dpi=100)
-    ax = fig.add_subplot(111, projection="3d")
-
+def _draw_3d(ax, mesh: trimesh.Trimesh) -> None:
+    """Add a shaded Poly3DCollection to a 3D axis."""
     tris = mesh.vertices[mesh.faces]
+    face_colors = _shade_faces(mesh)
     poly = Poly3DCollection(
         tris,
-        alpha=0.85,
-        facecolor="#9bb0c9",
-        edgecolor="#3a4a5e",
-        linewidth=0.2,
+        facecolors=face_colors,
+        edgecolor=DEFAULT_EDGE_COLOR,
+        linewidth=0.15,
     )
     ax.add_collection3d(poly)
-
     bbox = mesh.bounds
     ax.set_xlim(bbox[0, 0], bbox[1, 0])
     ax.set_ylim(bbox[0, 1], bbox[1, 1])
@@ -103,6 +134,16 @@ def render_3d(shape: Any, view: str = "iso", size: tuple[int, int] = (800, 600))
     except Exception:
         pass
 
+
+def render_3d(shape: Any, view: str = "iso", size: tuple[int, int] = (800, 600)) -> bytes:
+    """Render a 3D view of a build123d Shape. Returns PNG bytes."""
+    mesh = _shape_to_trimesh(shape)
+    elev, azim = VIEW_ANGLES_3D.get(view, VIEW_ANGLES_3D["iso"])
+
+    fig = plt.figure(figsize=(size[0] / 100, size[1] / 100), dpi=100)
+    ax = fig.add_subplot(111, projection="3d")
+
+    _draw_3d(ax, mesh)
     ax.view_init(elev=elev, azim=azim)
     ax.set_xlabel("X (mm)")
     ax.set_ylabel("Y (mm)")
@@ -132,8 +173,8 @@ def render_2d(
     pc = PolyCollection(
         tris,
         alpha=0.35,
-        facecolor="#9bb0c9",
-        edgecolor="#3a4a5e",
+        facecolor=DEFAULT_BASE_COLOR,
+        edgecolor=DEFAULT_EDGE_COLOR,
         linewidth=0.3,
     )
     ax.add_collection(pc)
@@ -162,7 +203,7 @@ def render_2d(
 
 
 def render_multiview(shape: Any, size: tuple[int, int] = (1200, 900)) -> bytes:
-    """Composite: front + right + top + iso. Returns PNG bytes."""
+    """Composite: front + right + top + iso (shaded). Returns PNG bytes."""
     mesh = _shape_to_trimesh(shape)
     fig = plt.figure(figsize=(size[0] / 100, size[1] / 100), dpi=100)
 
@@ -172,8 +213,8 @@ def render_multiview(shape: Any, size: tuple[int, int] = (1200, 900)) -> bytes:
         pc = PolyCollection(
             tris,
             alpha=0.35,
-            facecolor="#9bb0c9",
-            edgecolor="#3a4a5e",
+            facecolor=DEFAULT_BASE_COLOR,
+            edgecolor=DEFAULT_EDGE_COLOR,
             linewidth=0.3,
         )
         ax.add_collection(pc)
@@ -189,25 +230,9 @@ def render_multiview(shape: Any, size: tuple[int, int] = (1200, 900)) -> bytes:
     _ortho(fig.add_subplot(2, 2, 3), (0, 1), "Top",   "X", "Y")
 
     ax4 = fig.add_subplot(2, 2, 4, projection="3d")
-    tris = mesh.vertices[mesh.faces]
-    poly = Poly3DCollection(
-        tris,
-        alpha=0.85,
-        facecolor="#9bb0c9",
-        edgecolor="#3a4a5e",
-        linewidth=0.2,
-    )
-    ax4.add_collection3d(poly)
-    bbox = mesh.bounds
-    ax4.set_xlim(bbox[0, 0], bbox[1, 0])
-    ax4.set_ylim(bbox[0, 1], bbox[1, 1])
-    ax4.set_zlim(bbox[0, 2], bbox[1, 2])
-    try:
-        ax4.set_box_aspect((bbox[1] - bbox[0]))
-    except Exception:
-        pass
+    _draw_3d(ax4, mesh)
     ax4.view_init(elev=30, azim=-60)
-    ax4.set_title("Iso")
+    ax4.set_title("Iso (shaded)")
 
     fig.tight_layout()
     return _fig_to_png(fig)

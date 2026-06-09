@@ -5,6 +5,13 @@
 # Local-dev compose. Port bound to loopback only — partsmith does no
 # authentication, so direct LAN exposure is unsafe. For network access,
 # put an authenticating reverse proxy in front of it.
+#
+# v0.1: dropped the bridge default network for an `internal: true` net.
+# Container has no outbound internet path; the host still reaches it
+# via the published port (docker-proxy intercepts on the loopback).
+# This removes the exfiltration path that exec()'d build123d code
+# would otherwise have. Cuts off the only-legitimate-outbound use
+# case partsmith has (none) at the cost of zero functionality.
 
 services:
   partsmith:
@@ -12,6 +19,8 @@ services:
     container_name: partsmith
     hostname: partsmith
     restart: unless-stopped
+    networks:
+      - partsmith-net
     ports:
       - "127.0.0.1:8123:8123"
     volumes:
@@ -34,3 +43,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+networks:
+  partsmith-net:
+    driver: bridge
+    internal: true
