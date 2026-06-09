@@ -42,9 +42,18 @@ v0.2.2:
   Default rejects any Host header that isn't localhost/127.0.0.1 with
   `421 Misdirected Request`. partsmith's threat model puts everything
   on the perimeter (SECURITY.md); /mcp is for AI agents not browsers,
-  so DNS rebinding is not in scope. To re-enable, override
-  _mcp_server.settings.transport_security with a populated
-  TransportSecuritySettings before streamable_http_app() is called.
+  so DNS rebinding is not in scope.
+
+v0.2.3:
+- Switches the /mcp transport to stateless + json_response mode.
+  Default stateful mode keeps a long-poll GET /mcp/ stream open and
+  pushes tool responses to that stream (not to the POST response).
+  Strict-spec MCP clients (Cowork's managed UI in particular) hang on
+  the multiplexing of POST response vs GET stream events. Stateless
+  + json_response collapses every MCP call to a single POST with the
+  response in the body as application/json — the simplest, most
+  compatible mode. partsmith's tools are all request/response (no
+  streaming output) so this loses nothing.
 """
 
 from __future__ import annotations
@@ -157,12 +166,13 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 #   1. Build the MCP server + engine first
 #   2. Set streamable_http_path = "/" so the mounted URL is clean
 #   3. Disable DNS rebinding protection (v0.2.2 — see module docstring)
-#   4. Call streamable_http_app() to lazily init the session manager
-#   5. Wire session_manager.run() into FastAPI's lifespan kwarg
-#   6. Construct the FastAPI app with that lifespan
-#   7. Mount the MCP sub-app
+#   4. Switch to stateless + json_response mode (v0.2.3)
+#   5. Call streamable_http_app() to lazily init the session manager
+#   6. Wire session_manager.run() into FastAPI's lifespan kwarg
+#   7. Construct the FastAPI app with that lifespan
+#   8. Mount the MCP sub-app
 #
-# Without step 5 every MCP request crashes with
+# Without step 6 every MCP request crashes with
 # `RuntimeError: Task group is not initialized. Make sure to use run().`
 
 engine = CADEngine(workspace=WORKSPACE)
@@ -181,6 +191,16 @@ _mcp_server.settings.streamable_http_path = "/"
 _mcp_server.settings.transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=False,
 )
+
+# v0.2.3: stateless + json_response. Default stateful mode keeps a
+# long-poll GET /mcp/ open for server-pushed events; strict-spec
+# MCP clients (Cowork's managed UI) hang on that pattern. Stateless
+# + json_response collapses every MCP call to a single POST with
+# the response in the body as application/json — the simplest, most
+# compatible mode. partsmith's tools are all request/response (no
+# streaming output) so this loses nothing.
+_mcp_server.settings.stateless_http = True
+_mcp_server.settings.json_response = True
 
 # Calling streamable_http_app() also lazily creates session_manager.
 _mcp_asgi_app = _mcp_server.streamable_http_app()
