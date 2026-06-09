@@ -1,14 +1,14 @@
 [project]
 name = "partsmith"
-version = "0.1.0"
-description = "Minimal headless parametric-CAD server (build123d + REST)"
+version = "0.2.0"
+description = "Minimal headless parametric-CAD server (build123d + REST + MCP)"
 license = { text = "MIT" }
 authors = [
     { name = "JLay2026" }
 ]
 requires-python = ">=3.11"
 readme = "README.md"
-keywords = ["cad", "build123d", "rest", "3d-printing", "parametric"]
+keywords = ["cad", "build123d", "rest", "mcp", "3d-printing", "parametric"]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -27,6 +27,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
     "pydantic>=2.0.0",
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]

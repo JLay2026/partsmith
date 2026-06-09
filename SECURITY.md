@@ -2,8 +2,9 @@
 
 ## Threat model
 
-`partsmith` exposes a REST endpoint (`POST /model/create`) that
-**executes arbitrary Python code** provided by the caller. This is
+`partsmith` exposes endpoints (`POST /model/create` over REST, and the
+equivalent `partsmith_create_model` over the MCP transport at `/mcp`)
+that **execute arbitrary Python code** provided by the caller. This is
 intentional — the use case is "AI agents author parts via build123d
 code." Without this, the service has no reason to exist.
 
@@ -12,7 +13,9 @@ last line of defense:
 
 1. **The container has no authentication.** Every endpoint accepts
    unauthenticated requests. There are no API tokens, no rate
-   limiting, no source-IP allowlists at the application layer.
+   limiting, no source-IP allowlists at the application layer. This
+   applies equally to the REST surface and the MCP transport at
+   `/mcp`.
 2. **Code execution is scoped to the container** by Linux primitives:
    - Non-root user (uid 1000) by default in the shipped Dockerfile
    - All Linux capabilities dropped (`cap_drop: ALL` in `docker-compose.yml`)
@@ -24,7 +27,8 @@ last line of defense:
 3. **The intended deployment** places an authenticating reverse proxy
    (e.g. Caddy with forward-auth to an identity provider) in front of
    the container, with the container's port reachable only via that
-   proxy (host-firewall rule or Docker network isolation).
+   proxy (host-firewall rule or Docker network isolation). The proxy
+   protects both `/` (REST) and `/mcp` (MCP) under the same auth flow.
 
 ## What partsmith does NOT do
 
@@ -39,6 +43,23 @@ last line of defense:
 - **No outbound LLM integration.** Unlike some adjacent projects,
   partsmith does not call external APIs (OpenAI, Anthropic, etc.).
   The caller IS the LLM.
+
+## v0.2 notes
+
+- The MCP transport at `/mcp` inherits the same perimeter trust model
+  as the REST layer — anything past your reverse proxy reaches both
+  surfaces equally. Both wrap the same `CADEngine` instance so the
+  blast radius is identical.
+- The MCP `partsmith_export` tool can return files inline as base64
+  (≤ 8 MiB by default) or as a `url_path` the client fetches via
+  `GET /workspace/{filename}`. That GET endpoint enforces a strict
+  allowlist on filenames (`[a-zA-Z0-9_-]+\.(stl|step|3mf)` only) as
+  defense in depth against path traversal; the WORKSPACE bind mount
+  is the actual containment boundary.
+- The `BodySizeLimitMiddleware` 1 MiB cap applies to REST requests
+  only. MCP requests at `/mcp` are exempt because legitimate MCP
+  responses (base64-inlined renders / exports) can exceed 1 MiB; MCP
+  client-side framework limits bound the request side.
 
 ## Don't deploy partsmith without the perimeter
 
