@@ -1,0 +1,73 @@
+---
+# SPDX-FileCopyrightText: 2026 JLay2026
+# SPDX-License-Identifier: MIT
+#
+# Build + publish partsmith container images to ghcr.io.
+#
+# Triggers:
+#   - push to main           -> latest, main, sha-<full> tags
+#   - push of v* tag         -> semver tags (X.Y.Z, X.Y, X) + sha-<full>
+#   - manual (Actions tab)   -> same as branch push
+#
+# After the first successful run, make the package public:
+#   github.com/users/JLay2026/packages/container/partsmith -> Package settings
+#   -> Change visibility -> Public.
+# This is required for unauthenticated `docker pull` from zimaboard-services.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    name: Build + publish to ghcr.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata + compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/partsmith
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=long
+          labels: |
+            org.opencontainers.image.title=partsmith
+            org.opencontainers.image.description=Minimal headless parametric-CAD server (build123d + REST)
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build + push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
