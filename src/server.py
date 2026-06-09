@@ -24,9 +24,18 @@ v0.2.0:
   so models created via either protocol are visible to the other.
 - Adds `GET /workspace/{filename}` for the MCP large-file URL-pointer
   fallback (files > 8 MiB skip the base64 inline path).
-- Drops the cad-agent-shim dependency entirely — URL-based MCP clients
-  (e.g. Cowork's managed MCP UI) can drive partsmith directly with
-  Authentik Basic auth carried in the Headers field.
+
+v0.2.1:
+- Fixes the MCP mount: previously caused a `RuntimeError: Task group is
+  not initialized` on every MCP request because FastAPI's lifespan
+  doesn't propagate to mounted sub-apps. Now wires FastMCP's
+  session_manager.run() into a FastAPI lifespan context manager.
+- Sets `streamable_http_path = "/"` on the FastMCP instance so the
+  public URL is the clean `/mcp/` instead of the double-prefixed
+  `/mcp/mcp/`.
+- See entrypoint.sh for the matching uvicorn --proxy-headers fix
+  that prevents the scheme-downgrade issue (http:// in redirects when
+  behind Caddy).
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from __future__ import annotations
 import base64
 import os
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -129,9 +139,42 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app = FastAPI(title="partsmith", version=__version__)
-app.add_middleware(BodySizeLimitMiddleware)
+# ── App initialization (order matters for MCP lifespan) ──────────────
+#
+# FastMCP's StreamableHTTPSessionManager must run inside an async
+# context (`async with sm.run(): ...`). FastAPI's lifespan doesn't
+# propagate to apps mounted via `app.mount()`, so we have to:
+#   1. Build the MCP server + engine first
+#   2. Set streamable_http_path = "/" so the mounted URL is clean
+#   3. Call streamable_http_app() to lazily init the session manager
+#   4. Wire session_manager.run() into FastAPI's lifespan kwarg
+#   5. Construct the FastAPI app with that lifespan
+#   6. Mount the MCP sub-app
+#
+# Without step 4 every MCP request crashes with
+# `RuntimeError: Task group is not initialized. Make sure to use run().`
+
 engine = CADEngine(workspace=WORKSPACE)
+_mcp_server = build_mcp(engine, WORKSPACE)
+
+# Default streamable_http_path is "/mcp". Combined with our outer mount
+# point "/mcp" on FastAPI, that produces the double-prefixed
+# "/mcp/mcp/". Override to "/" so the public URL is just "/mcp/".
+_mcp_server.settings.streamable_http_path = "/"
+
+# Calling streamable_http_app() also lazily creates session_manager.
+_mcp_asgi_app = _mcp_server.streamable_http_app()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Run the FastMCP session manager for the lifetime of the FastAPI app."""
+    async with _mcp_server.session_manager.run():
+        yield
+
+
+app = FastAPI(title="partsmith", version=__version__, lifespan=_lifespan)
+app.add_middleware(BodySizeLimitMiddleware)
 
 
 # ── Request schemas ──────────────────────────────────
@@ -316,8 +359,7 @@ def serve_workspace_file(filename: str):
 
     Used by MCP clients when ``partsmith_export`` returns a ``url_path``
     pointer instead of inlining the file (size > INLINE_MAX_BYTES, 8 MiB
-    default). Same auth perimeter as everything else — Authentik
-    forward_auth at the proxy.
+    default).
 
     Strict allowlist on filename: must be ``<safe-name>.<allowed-ext>``,
     nothing else. Defense in depth on top of FastAPI's no-slash path
@@ -345,12 +387,11 @@ def serve_workspace_file(filename: str):
     )
 
 
-# ── v0.2: MCP Streamable-HTTP transport ─────────────────────────────
+# ── v0.2: MCP Streamable-HTTP transport (mount) ───────────────────
+#
+# The MCP ASGI app + session manager were built above (must precede the
+# FastAPI app construction so the lifespan can manage them). Mount it
+# now under /mcp — combined with streamable_http_path="/" on the
+# FastMCP, public URL is `/mcp/`.
 
-# Tools share the same `engine` instance as the REST endpoints above,
-# so models created via either protocol are visible to the other.
-# The MCP app handles its own routing under /mcp; FastMCP's
-# streamable_http_app() returns a Starlette ASGI app mountable as a
-# subapp on FastAPI.
-_mcp_server = build_mcp(engine, WORKSPACE)
-app.mount("/mcp", _mcp_server.streamable_http_app())
+app.mount("/mcp", _mcp_asgi_app)
