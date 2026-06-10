@@ -4,16 +4,15 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-06-09 (post-v0.2.3, after first real workload
-— Woodpeckers wall mount STL — shipped end-to-end through Cowork's
-managed MCP UI).
+**Last updated:** 2026-06-09 (post-v0.2.4 — persistent design store
+shipped; Wave A scope expanded to include ZimaOS Custom Install).
 
 ---
 
 ## Design principles (preserved across the roadmap)
 
 - **Small over capable.** Every feature has to justify its line count.
-  The whole server is ~650 LOC and we'd like to keep it small enough
+  The whole server is ~900 LOC and we'd like to keep it small enough
   that a new contributor can read it in an afternoon.
 - **Perimeter is the security boundary.** No in-app auth, no sandboxing
   theatre, no multi-tenant. See [`SECURITY.md`](SECURITY.md).
@@ -23,6 +22,9 @@ managed MCP UI).
 - **Deployment is part of the product.** Bugs that only appear behind
   a real reverse proxy with a real client (see CHANGELOG v0.2.x) are
   bugs we own. Tests catch them; defaults assume real-world deploy.
+- **Reuse the platform's native patterns.** ZimaOS provides Custom
+  Install + x-casaos; we use it natively rather than inventing a
+  parallel install flow.
 
 ---
 
@@ -34,11 +36,11 @@ that compresses repeated patterns has outsized payoff.
 | Issue | Item | Status |
 |---|---|---|
 | [#1](https://github.com/JLay2026/partsmith/issues/1) | Extract `partsmith_helpers` library from real designs (screw holes, slots, fillets, mounting patterns) | Open |
-| [#2](https://github.com/JLay2026/partsmith/issues/2) | Persistent design store — save/load build123d source to disk; survives container restart | Open |
+| [#2](https://github.com/JLay2026/partsmith/issues/2) | Persistent design store — save/load build123d source to disk; survives container restart | ✅ Shipped in v0.2.4 |
 | [#3](https://github.com/JLay2026/partsmith/issues/3) | Versioned designs with `partsmith_diff_designs(name, v1, v2)` | Open (depends on #2) |
 | [#4](https://github.com/JLay2026/partsmith/issues/4) | Cookbook — `examples/` dir with 5-10 starter designs covering common patterns | Open |
 
-**Target release:** v0.3.0
+**Target release:** v0.3.0 (#1 + #3 + #4 still pending)
 
 ---
 
@@ -92,10 +94,31 @@ investment).
 
 ---
 
+## Theme 5 — Operational (deployment ergonomics)
+
+User-facing deploy story. Native ZimaOS Custom Install (env vars as
+GUI form fields, install/update via dashboard) replaces the current
+CLI gitops flow that's caused real friction (e.g. the `.env` vs
+`.env.example` sync gotcha during v0.2.0 deploy).
+
+The actual implementation lives in `zimaboard-services` since that's
+where the deploy compose file lives. partsmith's contribution is
+the icon asset.
+
+| Item | Where it lives | Status |
+|---|---|---|
+| ZimaOS Custom Install pattern (x-casaos compose extension) for partsmith + nut/ retrofit | [zimaboard-services#5](https://github.com/JLay2026/zimaboard-services/issues/5) | Open (full draft x-casaos block in issue body) |
+| Placeholder partsmith icon (SVG, isometric cube) | [`assets/icon.svg`](assets/icon.svg) (this repo) | ✅ Shipped 2026-06-09 |
+
+**Target release:** v0.3.0 (bundled with Theme 1 since both are user-facing).
+
+---
+
 ## Suggested release sequence
 
 ```
-v0.3.0  — Theme 1 (issues #1, #2, #3, #4)
+v0.3.0  — Theme 1 (issues #1, #3, #4 — #2 already shipped in v0.2.4)
+        + Theme 5 (zimaboard-services#5 — ZimaOS Custom Install)
 v0.3.1  — Theme 4 (issue #5) — defensive, before more features
 v0.4.0  — Theme 2 (renderer + drawings)
 v0.5.0  — Theme 3 (3MF metadata, print analysis)
@@ -124,19 +147,16 @@ v1.0    — when partsmith has been used in earnest for 6 months and
 
 ## Related work (sibling repos)
 
-partsmith is one piece of a larger personal homelab stack. Some
-roadmap-adjacent work lives in sibling repos:
+partsmith is one piece of a larger personal homelab stack. Roadmap-
+adjacent work lives in sibling repos:
 
 - **[JLay2026/zimaboard-services](https://github.com/JLay2026/zimaboard-services)**
-  — the deploy harness for partsmith and other services. Pending work:
-  migrate from CLI `.env` + `docker compose` to ZimaOS dashboard
-  Custom Install (env vars as form fields). Affects the partsmith
-  `docker-compose.yml` + setup walkthrough but not the partsmith
-  codebase itself.
+  — the deploy harness. ZimaOS Custom Install pattern + nut/ retrofit
+  tracked in [issue #5](https://github.com/JLay2026/zimaboard-services/issues/5).
 - **[JLay2026/nanoclaw-zimaos](https://github.com/JLay2026/nanoclaw-zimaos)**
   — Caddy frontend for `cad.lan.denkhaus.io` and other LAN/Tailscale
-  vhosts. Pending work: `flush_interval -1` defensive add on the
-  `@cad` block (no-op on modern Caddy since SSE is auto-detected, but
+  vhosts. Pending: `flush_interval -1` defensive add on the `@cad`
+  block (no-op on modern Caddy since SSE is auto-detected, but
   belt-and-suspenders).
 - **[JLay2026/racknas-services](https://github.com/JLay2026/racknas-services)**
   — historical: hosted the Authentik integration that fronted
@@ -157,7 +177,7 @@ said:
   go on the roadmap.
 - **Want a feature NOT on the roadmap?** That's what "What's NOT on
   the roadmap" is for. If you really need it, fork — partsmith is MIT
-  and the codebase is small enough (~650 LOC) to maintain a fork.
+  and the codebase is small enough (~900 LOC) to maintain a fork.
 - **PRs welcome** for any open issue. Run the integration suite (#5,
   when it lands) before submitting.
 
