@@ -3,20 +3,25 @@
 """
 MCP Streamable-HTTP transport for partsmith.
 
-Wraps the same CADEngine + renderer + printability functions used by the
-REST layer as MCP tools, so URL-based MCP clients (e.g. Cowork's managed
-MCP UI) can drive partsmith directly with no intermediate shim process.
+Wraps the same CADEngine + renderer + printability + design store
+functions used by the REST layer as MCP tools, so URL-based MCP clients
+(e.g. Cowork's managed MCP UI) can drive partsmith directly with no
+intermediate shim process.
 
 File-returning tools (render_*, export) return small payloads inline as
 base64; payloads above ``INLINE_MAX_BYTES`` (default 8 MiB) are written
 to the workspace and returned as a ``url_path`` the client GETs back
-through the same Authentik perimeter.
+through the same auth perimeter.
 
 All MCP tool names are prefixed ``partsmith_`` to avoid collisions in
 multi-server MCP setups (Cowork can have several servers registered).
 
 The MCP app is mounted at ``/mcp`` on the FastAPI app and inherits the
 same auth perimeter — no separate auth in this module.
+
+v0.2.4: adds 4 design-store tools (save/load/list/delete) backed by
+the on-disk DesignStore. Designs survive container restart; models
+don't.
 """
 from __future__ import annotations
 
@@ -28,12 +33,13 @@ from mcp.server.fastmcp import FastMCP
 
 from . import __version__
 from .cad_engine import CADEngine
+from .design_store import DesignStore
 from .printability import analyze as analyze_printability
 from .renderer import render_2d, render_3d, render_multiview
 
 # Files at or under this size are inlined as base64 in the tool result.
 # Larger files persist to ``workspace`` and the tool returns a relative
-# ``url_path`` the client fetches via GET (same Authentik creds).
+# ``url_path`` the client fetches via GET.
 #
 # 8 MiB is a deliberate sweet spot:
 #   - typical STLs (cubes, brackets, simple parts) are well under 1 MiB
@@ -74,11 +80,17 @@ def _file_response(data: bytes, filename: str, content_type: str) -> dict:
     }
 
 
-def build_mcp(engine: CADEngine, workspace_dir: Path) -> FastMCP:
+def build_mcp(
+    engine: CADEngine,
+    workspace_dir: Path,
+    store: DesignStore,
+) -> FastMCP:
     """Build a FastMCP server exposing partsmith tools.
 
     Tools share the same ``engine`` instance as the REST layer, so a
     model created via MCP can be measured via REST and vice versa.
+    The ``store`` is the on-disk DesignStore for persistent designs
+    (see ``design_store.py``).
     """
     mcp = FastMCP("partsmith")
 
@@ -139,6 +151,9 @@ def build_mcp(engine: CADEngine, workspace_dir: Path) -> FastMCP:
         Returns dict with: success (bool), stdout, error, geometry
         (bounding box / volume / surface area), and optionally
         preview_data_b64.
+
+        Note: models are in-memory only. Use partsmith_save_design to
+        persist source code that survives container restart.
         """
         return _do_create(code, name)
 
@@ -159,6 +174,8 @@ def build_mcp(engine: CADEngine, workspace_dir: Path) -> FastMCP:
         Registry is in-memory; container restart wipes it. Models are
         kept in a 32-entry LRU bound -- least-recently-accessed evict
         first when capacity is reached.
+
+        For designs that survive restart, see partsmith_list_designs.
         """
         return {"models": engine.list_all()}
 
@@ -293,5 +310,129 @@ def build_mcp(engine: CADEngine, workspace_dir: Path) -> FastMCP:
         return analyze_printability(
             state.shape, min_wall_thickness_mm=min_wall_thickness_mm
         )
+
+    # -- v0.2.4: design store tools ------------------------------
+
+    @mcp.tool()
+    def partsmith_save_design(
+        name: str,
+        code: str,
+        description: str = "",
+    ) -> dict:
+        """Save a design's source code to disk so it survives container restart.
+
+        Designs live at ``{workspace}/designs/{name}.py`` plus a JSON
+        sidecar with metadata. Survives ``docker compose restart`` /
+        ``up -d --force-recreate``; gone only when explicitly deleted
+        or the workspace bind mount is removed.
+
+        Side effect: also executes the code as a model so the result is
+        immediately available for render / measure / export without a
+        separate ``partsmith_create_model`` call. If execution fails the
+        save still succeeds (source is the source of truth; user can
+        fix and re-save).
+
+        Args:
+            name: Design identifier (NAME_PATTERN-validated).
+            code: build123d Python source. Stored verbatim.
+            description: Optional free-form description.
+
+        Returns:
+            saved (bool), execution (dict with success/error/geometry),
+            metadata (dict with name/created_at/last_modified/description/geometry).
+        """
+        # Try to execute for geometry snapshot. Failure is non-fatal --
+        # source is the source of truth.
+        geometry = None
+        execution_result = engine.execute_code(code, name)
+        if execution_result.get("success") and execution_result.get("geometry"):
+            geometry = execution_result["geometry"]
+
+        try:
+            metadata = store.save(
+                name, code, description=description, geometry=geometry
+            )
+        except ValueError as e:
+            return {"error": f"Invalid name: {e}"}
+        except OSError as e:
+            return {
+                "error": (
+                    f"Save failed: {e}. Check that {store.designs_dir} is "
+                    "writable by uid 1000 (the container user)."
+                )
+            }
+
+        return {
+            "saved": True,
+            "execution": {
+                "success": execution_result.get("success", False),
+                "error": execution_result.get("error"),
+                "geometry": execution_result.get("geometry"),
+            },
+            "metadata": metadata.to_dict(),
+        }
+
+    @mcp.tool()
+    def partsmith_load_design(name: str) -> dict:
+        """Load a saved design from disk and execute it as a model.
+
+        After load, the design is available as a model under the same
+        name and can be rendered / measured / exported with the regular
+        model tools.
+
+        Args:
+            name: Design identifier (must exist in the design store).
+
+        Returns same shape as partsmith_create_model
+        (success/stdout/error/geometry/preview_data_b64), plus:
+            loaded_from: "design_store"
+            design_metadata: the persisted metadata dict
+        """
+        try:
+            code, metadata = store.load(name)
+        except FileNotFoundError:
+            return {"error": f"Design not found: {name}"}
+        except ValueError as e:
+            return {"error": f"Invalid name: {e}"}
+
+        result = _do_create(code, name)
+        result["loaded_from"] = "design_store"
+        result["design_metadata"] = metadata.to_dict()
+        return result
+
+    @mcp.tool()
+    def partsmith_list_designs() -> dict:
+        """List all saved designs with their metadata.
+
+        Returns a list of design metadata dicts (name, created_at,
+        last_modified, description, geometry snapshot). Geometry is the
+        snapshot captured at save time so this is cheap (no re-execution).
+
+        See partsmith_list_models for in-memory (non-persistent) models.
+        """
+        return {"designs": [m.to_dict() for m in store.list_all()]}
+
+    @mcp.tool()
+    def partsmith_delete_design(name: str) -> dict:
+        """Delete a saved design from disk (both .py source + .json metadata).
+
+        Does NOT remove any in-memory model with the same name; use the
+        REST endpoint or restart partsmith to clear the model registry.
+
+        Args:
+            name: Design identifier to delete.
+
+        Returns:
+            deleted (bool): True if anything was removed, False if no
+                            design existed by that name.
+            name (str): the requested name (echoed back).
+        """
+        try:
+            deleted = store.delete(name)
+        except ValueError as e:
+            return {"error": f"Invalid name: {e}"}
+        except OSError as e:
+            return {"error": f"Delete failed: {e}"}
+        return {"deleted": deleted, "name": name}
 
     return mcp

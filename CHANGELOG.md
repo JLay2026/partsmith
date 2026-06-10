@@ -4,6 +4,50 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.2.4] — 2026-06-09
+
+### Added
+- **Persistent design store** (`src/design_store.py`). Designs are
+  saved to disk under `{workspace}/designs/` as `{name}.py` (source) +
+  `{name}.json` (metadata: timestamps, description, geometry snapshot).
+  Survive container restart; models are still in-memory only.
+- **4 new MCP tools:**
+  - `partsmith_save_design(name, code, description="")` — save + also
+    execute as a model so the result is immediately available
+  - `partsmith_load_design(name)` — load source from disk + execute
+  - `partsmith_list_designs()` — list all saved designs (cheap, no
+    re-execution; uses geometry snapshot captured at save time)
+  - `partsmith_delete_design(name)` — remove design files from disk
+- **5 new REST endpoints:**
+  - `POST /design/save`
+  - `GET /design/list`
+  - `GET /design/{name}` — source + metadata, no execution
+  - `DELETE /design/{name}`
+  - `POST /design/{name}/load` — load + execute as model
+
+### Design notes
+- Two-file persistence (source + sidecar) instead of single JSON so
+  source is human-readable on disk (`cat workspace/designs/bracket.py`)
+  and git-friendly if the workspace is versioned. Sidecar is bookkeeping
+  that can be regenerated from defaults if missing or corrupt.
+- `save` always tries to execute the code so geometry can be snapshotted
+  for `list` efficiency. If execution fails, save still succeeds — source
+  is the source of truth and the user can fix it later.
+- Same `NAME_PATTERN` validation as models. Path-traversal defense via
+  resolved-path-relative-to check.
+
+### Why
+Real designs go through 5-10 iterations. Pre-v0.2.4 every container
+restart wiped them. With this, your work isn't gated on container uptime.
+
+Resolves [#2](https://github.com/JLay2026/partsmith/issues/2).
+First v0.3.0 Theme 1 (author ergonomics) item to ship.
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.2.3] — 2026-06-09
 
 ### Changed

@@ -26,34 +26,24 @@ v0.2.0:
   fallback (files > 8 MiB skip the base64 inline path).
 
 v0.2.1:
-- Fixes the MCP mount: previously caused a `RuntimeError: Task group is
-  not initialized` on every MCP request because FastAPI's lifespan
-  doesn't propagate to mounted sub-apps. Now wires FastMCP's
-  session_manager.run() into a FastAPI lifespan context manager.
-- Sets `streamable_http_path = "/"` on the FastMCP instance so the
-  public URL is the clean `/mcp/` instead of the double-prefixed
-  `/mcp/mcp/`.
-- See entrypoint.sh for the matching uvicorn --proxy-headers fix
-  that prevents the scheme-downgrade issue (http:// in redirects when
-  behind Caddy).
+- FastMCP lifespan integration (fixes Task group RuntimeError);
+  streamable_http_path="/" override (clean /mcp/ URL);
+  uvicorn --proxy-headers for behind-Caddy scheme handling.
 
 v0.2.2:
-- Disables FastMCP's DNS rebinding protection on the /mcp transport.
-  Default rejects any Host header that isn't localhost/127.0.0.1 with
-  `421 Misdirected Request`. partsmith's threat model puts everything
-  on the perimeter (SECURITY.md); /mcp is for AI agents not browsers,
-  so DNS rebinding is not in scope.
+- Disable FastMCP DNS rebinding protection (was rejecting non-localhost
+  Host with 421).
 
 v0.2.3:
-- Switches the /mcp transport to stateless + json_response mode.
-  Default stateful mode keeps a long-poll GET /mcp/ stream open and
-  pushes tool responses to that stream (not to the POST response).
-  Strict-spec MCP clients (Cowork's managed UI in particular) hang on
-  the multiplexing of POST response vs GET stream events. Stateless
-  + json_response collapses every MCP call to a single POST with the
-  response in the body as application/json — the simplest, most
-  compatible mode. partsmith's tools are all request/response (no
-  streaming output) so this loses nothing.
+- Stateless + json_response MCP mode (compatible with strict-spec MCP
+  clients including Cowork's managed UI).
+
+v0.2.4:
+- Persistent design store (`src/design_store.py`). Designs survive
+  container restart; models don't. 5 new REST endpoints under
+  `/design/...` and 4 new MCP tools (`partsmith_save_design`,
+  `partsmith_load_design`, `partsmith_list_designs`,
+  `partsmith_delete_design`). See ROADMAP.md Theme 1 / issue #2.
 """
 
 from __future__ import annotations
@@ -73,6 +63,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from .cad_engine import CADEngine
+from .design_store import DesignStore
 from .mcp_transport import build_mcp
 from .printability import analyze as analyze_printability
 from .renderer import render_2d, render_3d, render_multiview
@@ -163,9 +154,9 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 # FastMCP's StreamableHTTPSessionManager must run inside an async
 # context (`async with sm.run(): ...`). FastAPI's lifespan doesn't
 # propagate to apps mounted via `app.mount()`, so we have to:
-#   1. Build the MCP server + engine first
+#   1. Build the MCP server + engine + store first
 #   2. Set streamable_http_path = "/" so the mounted URL is clean
-#   3. Disable DNS rebinding protection (v0.2.2 — see module docstring)
+#   3. Disable DNS rebinding protection (v0.2.2)
 #   4. Switch to stateless + json_response mode (v0.2.3)
 #   5. Call streamable_http_app() to lazily init the session manager
 #   6. Wire session_manager.run() into FastAPI's lifespan kwarg
@@ -176,7 +167,8 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 # `RuntimeError: Task group is not initialized. Make sure to use run().`
 
 engine = CADEngine(workspace=WORKSPACE)
-_mcp_server = build_mcp(engine, WORKSPACE)
+store = DesignStore(workspace=WORKSPACE)  # v0.2.4
+_mcp_server = build_mcp(engine, WORKSPACE, store)
 
 # Default streamable_http_path is "/mcp". Combined with our outer mount
 # point "/mcp" on FastAPI, that produces the double-prefixed
@@ -241,6 +233,13 @@ class PrintabilityRequest(BaseModel):
     min_wall_thickness: float = Field(0.8, ge=0.0, le=100.0)
 
 
+class SaveDesignRequest(BaseModel):
+    """v0.2.4: save a design to the on-disk store."""
+    code: str = Field(..., max_length=MAX_REQUEST_BYTES)
+    name: str = Field(..., pattern=NAME_PATTERN, max_length=64)
+    description: str = Field("", max_length=500)
+
+
 # ── Health ───────────────────────────────────────────────
 
 @app.get("/health")
@@ -289,7 +288,7 @@ def measure_model(name: str = "default"):
     return engine.measure(name)
 
 
-# ── Rendering ─────────────────────────────────────────────
+# ── Rendering ──────────────────────────────────────────────
 
 @app.post("/render/3d")
 def render_3d_endpoint(req: RenderRequest):
@@ -357,7 +356,7 @@ def render_all_endpoint(req: RenderRequest):
     return out
 
 
-# ── Export ────────────────────────────────────────────────────
+# ── Export ───────────────────────────────────────────────────
 
 @app.post("/export")
 def export_model(req: ExportRequest):
@@ -425,6 +424,123 @@ def serve_workspace_file(filename: str):
         filename=safe,
         media_type="application/octet-stream",
     )
+
+
+# ── v0.2.4: persistent design store (REST) ──────────────────
+
+@app.post("/design/save")
+def save_design(req: SaveDesignRequest):
+    """Save a design's source + metadata to disk. Also executes as a model.
+
+    Mirrors `partsmith_save_design` MCP tool — see that for semantics.
+    Source survives container restart; the in-memory model registration
+    is a side effect.
+    """
+    # Try to execute for geometry snapshot. Failure is non-fatal; source
+    # is the source of truth.
+    geometry = None
+    execution_result = engine.execute_code(req.code, req.name)
+    if execution_result.get("success") and execution_result.get("geometry"):
+        geometry = execution_result["geometry"]
+
+    try:
+        metadata = store.save(
+            req.name, req.code, description=req.description, geometry=geometry
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(
+            500,
+            f"Save failed: {e}. Check that {store.designs_dir} is writable by uid 1000.",
+        )
+
+    return {
+        "saved": True,
+        "execution": {
+            "success": execution_result.get("success", False),
+            "error": execution_result.get("error"),
+            "geometry": execution_result.get("geometry"),
+        },
+        "metadata": metadata.to_dict(),
+    }
+
+
+@app.get("/design/list")
+def list_designs():
+    """List all saved designs with their metadata (cheap — no re-execution)."""
+    return {"designs": [m.to_dict() for m in store.list_all()]}
+
+
+@app.get("/design/{name}")
+def get_design(name: str):
+    """Load a design's source code + metadata WITHOUT executing.
+
+    For "load and run as a model" use POST /design/{name}/load instead.
+    """
+    _validate_name(name)
+    try:
+        code, metadata = store.load(name)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Design not found: {name}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"code": code, "metadata": metadata.to_dict()}
+
+
+@app.delete("/design/{name}")
+def delete_design(name: str):
+    """Delete a saved design (.py + .json) from disk.
+
+    Does not affect any in-memory model with the same name.
+    """
+    _validate_name(name)
+    try:
+        deleted = store.delete(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(500, f"Delete failed: {e}")
+    if not deleted:
+        raise HTTPException(404, f"Design not found: {name}")
+    return {"deleted": True, "name": name}
+
+
+@app.post("/design/{name}/load")
+def load_and_execute_design(name: str):
+    """Load a design from disk + execute it (register as a model).
+
+    Returns the same shape as POST /model/create.
+    """
+    _validate_name(name)
+    try:
+        code, metadata = store.load(name)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Design not found: {name}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Execute as a model (same shape as POST /model/create)
+    result = engine.execute_code(code, name)
+    if result["success"] and result["geometry"]:
+        state = engine.get(name)
+        if state and state.shape:
+            try:
+                png = render_3d(state.shape, view="iso")
+                result["preview_base64"] = base64.b64encode(png).decode("ascii")
+                preview_path = RENDERS / f"{name}_preview.png"
+                preview_path.write_bytes(png)
+                result["preview_path"] = str(preview_path)
+            except OSError as e:
+                result["render_error"] = (
+                    f"preview write failed: {e}. "
+                    f"Check that {RENDERS} is writable by uid 1000."
+                )
+            except Exception as e:
+                result["render_error"] = str(e)
+    result["loaded_from"] = "design_store"
+    result["design_metadata"] = metadata.to_dict()
+    return result
 
 
 # ── v0.2: MCP Streamable-HTTP transport (mount) ───────────────────
