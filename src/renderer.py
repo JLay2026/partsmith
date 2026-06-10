@@ -27,7 +27,6 @@ from matplotlib.collections import PolyCollection  # noqa: E402
 from matplotlib.colors import to_rgb  # noqa: E402
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
-
 # View name -> (elev, azim) for mpl_toolkits.mplot3d.view_init
 VIEW_ANGLES_3D = {
     "front":    (0, -90),
