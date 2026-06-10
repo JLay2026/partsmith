@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-
 # v0.1: bound the in-memory model registry to prevent unbounded growth.
 # 32 is plenty for batch CAD authoring; LRU eviction discards the
 # oldest-touched entries first.
