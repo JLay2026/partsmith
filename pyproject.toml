@@ -50,6 +50,14 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["src*"]
 
+[tool.pytest.ini_options]
+# Prepend repo root to sys.path so `from src.X import Y` works without
+# requiring `pip install -e .`. The lightweight CI job (ci.yml pytest)
+# deliberately skips the heavy editable install (would pull build123d
+# + OpenCASCADE wheel), so this is the cleanest way to make
+# tests/test_*.py importable. Added v0.3.1.
+pythonpath = ["."]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
