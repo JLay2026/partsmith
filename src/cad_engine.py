@@ -6,6 +6,11 @@ build123d wrapper.
 execute_code() runs arbitrary Python in a namespace pre-loaded with
 build123d. This is intentional and load-bearing — see SECURITY.md.
 Do not deploy without an authenticating reverse proxy in front.
+
+v0.2.5 (issue #1): auto-injects partsmith_helpers into the build123d
+execution namespace. Tool calls can now use through_hole(), screw_hole(),
+slot(), chamfer_edges(), etc. without explicit imports. See
+partsmith_helpers.py for the full helper set.
 """
 
 from __future__ import annotations
@@ -102,6 +107,19 @@ class CADEngine:
         try:
             exec("from build123d import *", namespace)
             exec("import numpy as np", namespace)
+
+            # v0.2.5: inject partsmith_helpers into namespace.
+            # Lazy import: keeps server-boot fast (helpers import is only
+            # paid on first execute_code call; subsequent calls hit the
+            # interpreter's import cache for free).
+            try:
+                from .partsmith_helpers import HELPERS as _PARTSMITH_HELPERS
+                namespace.update(_PARTSMITH_HELPERS)
+            except ImportError:
+                # Should never happen in a healthy deploy; preserve
+                # legacy behavior (raw build123d only) if it does.
+                pass
+
             exec(code, namespace)
 
             shape = self._extract_shape(namespace)
