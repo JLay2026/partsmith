@@ -4,6 +4,59 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.3] — 2026-06-11
+
+### Added
+- **Filled cross-sections** (`src/renderer.py`). `render_section()` now
+  shades the cut material (translucent fill) under the section outline
+  so solid vs. void reads at a glance — the whole point of looking at a
+  section. Drawn from the slice's discrete closed loops, projected to
+  the same 2D frame as the outline. Holes (e.g. a tube bore) are marked
+  by their outline and read as lighter regions.
+- **Topology-complexity deltas in `partsmith_diff_designs`** /
+  `GET /design/{name}/diff` (`src/design_store.py`). The diff now
+  reports `face_count_delta`, `edge_count_delta`, and
+  `vertex_count_delta` alongside the existing volume / surface-area /
+  bbox deltas. A positive `face_count_delta` means v2 is structurally
+  more complex than v1 (added bosses, holes, fillets…).
+- **Topology counts in the geometry snapshot** (`src/cad_engine.py`).
+  `ModelState.to_summary()` now includes `face_count` / `edge_count` /
+  `vertex_count`, so every saved design version persists them and the
+  diff above has data to work with. Also enriches `/model/list` and
+  create/modify responses.
+- **`tests/test_versioning.py`** — 2 new pure-stdlib tests:
+  `test_diff_topology_deltas` (counts subtract correctly) and
+  `test_diff_topology_deltas_missing` (None-safe when a pre-v0.3.3
+  version lacks counts). Existing missing-geometry test extended to
+  assert the new fields are None-safe too.
+
+### Design notes
+- **B-rep counts, not mesh triangles.** Issue #13 framed this as a
+  "triangle-count delta", but mesh triangle counts depend on
+  tessellation tolerance — the same design would diff non-reproducibly.
+  B-rep `shape.faces()/edges()/vertices()` counts are deterministic and
+  a truer signal of "did the part get more complex", so that's what
+  ships. They're also free (already computed by `measure()`).
+- **Single source of truth for the snapshot.** The counts are added in
+  `to_summary()` rather than duplicated across the REST and MCP save
+  handlers, so both protocols inherit them with no per-handler code.
+- **Fill is best-effort.** Any failure in the fill path is caught and
+  the render degrades to the v0.2.6 outline-only behavior rather than
+  erroring. The outline is always truth; the fill is a visual aid.
+
+### Why
+Sprint A / Theme 2 (output fidelity). A section you can't tell solid
+from void in is only half a section; a diff that says "the source
+changed" without "and it got 3 faces more complex" makes the reviewer
+do the geometry math in their head. Both close that gap.
+
+Resolves [#13](https://github.com/JLay2026/partsmith/issues/13).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.3.2] — 2026-06-11
 
 ### Added
