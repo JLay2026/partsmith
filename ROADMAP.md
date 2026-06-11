@@ -4,8 +4,9 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-06-10 (post-v0.3.1 — ship session closed out
-Theme 1 + Theme 4 + Theme 5; cookbook moved to backlog).
+**Last updated:** 2026-06-11 (post-v0.3.4 — Sprint A closed two Theme 2
+items: cross-section fill + topology deltas v0.3.3, dimensioned drawings
+v0.3.4. Renderer-swap spike remains).
 
 ---
 
@@ -14,9 +15,9 @@ Theme 1 + Theme 4 + Theme 5; cookbook moved to backlog).
 | Theme | State |
 |---|---|
 | Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 backlog) |
-| Theme 2 — Output fidelity | 🟡 In progress (cross-section shipped v0.2.6; drawings + renderer remain) |
+| Theme 2 — Output fidelity | 🟡 In progress (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; renderer swap remains) |
 | Theme 3 — Print workflow | ⬜ Not started |
-| Theme 4 — Validated quality | ✅ Framework shipped v0.3.1 (#5; 2 more integration tests pending) |
+| Theme 4 — Validated quality | ✅ Complete (#5; full integration suite shipped v0.3.1 + v0.3.2) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
 ---
@@ -39,7 +40,8 @@ Theme 1 + Theme 4 + Theme 5; cookbook moved to backlog).
   parallel install flow.
 - **Earn the feature with real demand.** New patterns (helpers,
   cookbook entries) get added when a real design has demanded them
-  twice, not on speculation. See the cookbook (#4) deferral.
+  twice, not on speculation. See the cookbook (#4) deferral and the
+  drawing feature-callout deferral (v0.3.4).
 
 ---
 
@@ -64,18 +66,21 @@ blank-page + iteration pain.
 Current iso-view renders are "good enough to confirm not garbage" but
 you can't tell from them whether wall thickness, screw hole position,
 or fillet radius is right. Better outputs → fewer print failures.
-**Cross-sections already shipped from this theme** (v0.2.6); it's now
-the front of the queue.
+**Cross-sections (v0.2.6), section fill + topology diffs (v0.3.3), and
+dimensioned drawings (v0.3.4) have all shipped.** Only the renderer
+swap remains, and it's a "may decline" spike.
 
 | Issue | Item | What it gives you | Effort | Status |
 |---|---|---|---|---|
 | [#8](https://github.com/JLay2026/partsmith/issues/8) | Cross-sections — `partsmith_render_section(name, plane, at)` | See internal cavities, wall thickness, snap-fit clearances | M | ✅ Shipped v0.2.6 |
-| — | Dimensioned 2D engineering drawings | Visual confirmation the bracket is 50mm wide BEFORE printing | M | ⬜ No issue yet |
-| — | Cross-section fill + triangle-count delta (v0.2.6 follow-up) | Solid material reads at a glance; richer diffs | S-M | ⬜ Noted in v0.2.6/v0.2.7 CHANGELOG |
-| — | VTK or trimesh-scene renderer swap | Photorealistic-ish previews where surface finish matters | M-L | ⬜ No issue yet |
+| [#13](https://github.com/JLay2026/partsmith/issues/13) | Cross-section fill + topology-complexity deltas | Solid material reads at a glance; richer version diffs | S-M | ✅ Shipped v0.3.3 |
+| [#12](https://github.com/JLay2026/partsmith/issues/12) | Dimensioned 2D engineering drawings — `partsmith_render_drawing(name, view)` | Visual confirmation the bracket is 50 mm wide BEFORE printing | M | ✅ Shipped v0.3.4 |
+| [#14](https://github.com/JLay2026/partsmith/issues/14) | VTK / trimesh-scene renderer swap | Photorealistic-ish previews where surface finish matters | M-L | ⬜ Spike — likely declined (bloats the slim container; see principle "small over capable") |
+| — | Drawing feature callouts (hole Ø, c-to-c spacing) | Per-feature dims, not just overall W/H | M | ⬜ Deferred from v0.3.4 (needs reliable mesh circle detection; earn with real demand) |
 | — | Multi-color preview — indicate AMS slot per face/body | Once you're using all 4 AMS slots for a part | L | ⬜ No issue yet |
 
-**Target release:** v0.4.0. File issues when starting each item.
+**Target release:** Theme 2 substantially done at v0.3.4. File issues
+when starting the renderer swap or feature callouts.
 
 ---
 
@@ -98,21 +103,20 @@ out-of-tree plugin.
 ## Theme 4 — Validated quality (prevents the next 5-hour debug) ✅
 
 The four v0.2.x deploy bugs (see CHANGELOG) would have been caught by
-integration tests against a containerized partsmith. **The framework
-now exists** (v0.3.1) and runs on every PR.
+integration tests against a containerized partsmith. **The full suite
+now exists** (v0.3.1 framework + v0.3.2 completion) and runs on every PR.
 
 | Issue | Item | Status |
 |---|---|---|
-| [#5](https://github.com/JLay2026/partsmith/issues/5) | pytest integration suite + GitHub Actions CI | ✅ Shipped v0.3.1 (framework + 3 tests: /health, MCP handshake, tool inventory) |
+| [#5](https://github.com/JLay2026/partsmith/issues/5) | pytest integration suite + GitHub Actions CI | ✅ Complete — framework v0.3.1, full suite v0.3.2 |
 
-**Shipped in v0.3.1:**
-- `ci.yml` lightweight pytest job (runs `tests/test_versioning.py` on every PR, ~13s)
+**Shipped:**
+- `ci.yml` lightweight pytest job (ruff + `tests/test_versioning.py` on every PR, ~30s)
 - `integration.yml` — builds the container, starts it, runs `tests/integration/` against `/health` + `/mcp/`
+- Four integration files: `test_health`, `test_mcp_handshake` (v0.3.1);
+  `test_mcp_tools` (create→export→section→drawing round-trips),
+  `test_caddy_compat` (X-Forwarded-Proto scheme check) (v0.3.2+)
 - Catches the v0.2.1/v0.2.2/v0.2.3 regression classes in a single MCP handshake test
-
-**Pending follow-up (v0.3.2):**
-- `test_mcp_tools.py` — full create_model → export round-trip
-- `test_caddy_compat.py` — X-Forwarded-Proto scheme-downgrade check
 
 ---
 
@@ -144,11 +148,13 @@ v0.2.4  ✅ Theme 1 #2 — persistent design store
 v0.2.5  ✅ Theme 1 #1 — partsmith_helpers library
 v0.2.6  ✅ Theme 2 #8 — cross-section renderer
 v0.2.7  ✅ Theme 1 #3 — versioned designs + diff
-v0.3.1  ✅ Theme 4 #5 — pytest CI + integration suite
+v0.3.1  ✅ Theme 4 #5 — pytest CI + integration framework
         ✅ Theme 5    — ZimaOS Custom Install (zimaboard-services)
+v0.3.2  ✅ Theme 4 #5 — integration suite completed (mcp_tools, caddy_compat)
+v0.3.3  ✅ Theme 2 #13 — cross-section fill + topology deltas
+v0.3.4  ✅ Theme 2 #12 — dimensioned drawings
 ---- you are here ----
-v0.3.2  — Theme 4 follow-up (test_mcp_tools, test_caddy_compat) when convenient
-v0.4.0  — Theme 2 (dimensioned drawings, renderer swap, section fill)
+v0.3.x  — Theme 2 #14 renderer-swap spike (likely declined) or feature callouts
 v0.5.0  — Theme 3 (3MF metadata, pre-slicing analysis)
 v0.6+   — Theme 3 cont. (Bambu Connect) or whatever real workloads surface
 backlog — #4 cookbook (after more real prints); nut/ retrofit
