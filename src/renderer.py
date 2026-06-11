@@ -12,6 +12,10 @@ v0.2.6 (issue #8): adds render_section() — 2D cross-section through a
 shape on the XY/XZ/YZ planes at a given offset. Highest-leverage move
 for the iterate-by-AI-chat workflow: see inside designs without leaving
 the chat.
+
+v0.3.3 (issue #13): render_section() now fills the cut material so
+solid vs. void reads at a glance. Fill is best-effort — any failure
+falls back to the v0.2.6 outline-only render rather than erroring.
 """
 
 from __future__ import annotations
@@ -72,6 +76,9 @@ SECTION_PLANES = {
 # Default 3D look: muted blue-grey body, dark edges, subtle ambient
 DEFAULT_BASE_COLOR = "#9bb0c9"
 DEFAULT_EDGE_COLOR = "#3a4a5e"
+# Fill color for cut material in cross-sections (v0.3.3). Warmer than
+# the body so a section reads as "this is the cut face" at a glance.
+DEFAULT_SECTION_FILL = "#c98f6b"
 # Light from upper-right-front; normalized below.
 DEFAULT_LIGHT_DIR = np.array([0.5, -0.3, 0.85])
 DEFAULT_AMBIENT = 0.30  # 30% floor so back-facing tris aren't black
@@ -257,6 +264,57 @@ def render_multiview(shape: Any, size: tuple[int, int] = (1200, 900)) -> bytes:
     return _fig_to_png(fig)
 
 
+def _fill_section(ax, section_path3d, plot_axes) -> bool:
+    """Fill the interior of a cross-section (v0.3.3, issue #13).
+
+    Builds a compound matplotlib Path from the section's discrete closed
+    loops, projected to 2D via ``plot_axes``, and adds a translucent
+    PathPatch so cut material reads as solid. Inner loops (holes, e.g. a
+    tube's bore) come back as separate loops; the translucent fill keeps
+    them legible even if winding doesn't perfectly cut them, and the
+    crisp outline drawn on top always marks the true boundary.
+
+    Best-effort: returns True if a fill patch was added, False if there
+    was nothing fillable. Any exception is left to the caller's
+    try/except so a fill failure degrades to outline-only.
+    """
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path as MplPath
+
+    loops = getattr(section_path3d, "discrete", None)
+    if not loops:
+        return False
+
+    verts: list = []
+    codes: list = []
+    for loop in loops:
+        pts = np.asarray(loop, dtype=float)
+        if pts.ndim != 2 or pts.shape[0] < 3:
+            continue
+        loop2d = pts[:, list(plot_axes)]
+        verts.append(loop2d[0])
+        codes.append(MplPath.MOVETO)
+        for p in loop2d[1:]:
+            verts.append(p)
+            codes.append(MplPath.LINETO)
+        verts.append(loop2d[0])
+        codes.append(MplPath.CLOSEPOLY)
+
+    if not verts:
+        return False
+
+    compound = MplPath(np.asarray(verts), codes)
+    ax.add_patch(
+        PathPatch(
+            compound,
+            facecolor=DEFAULT_SECTION_FILL,
+            edgecolor="none",
+            alpha=0.45,
+        )
+    )
+    return True
+
+
 def render_section(
     shape: Any,
     plane: str = "YZ",
@@ -267,7 +325,7 @@ def render_section(
     """Render a 2D cross-section through a build123d Shape.
 
     Slices the mesh on the chosen plane at offset ``at`` and renders the
-    resulting outline as a 2D PNG. Use to see inside designs without
+    resulting cut as a 2D PNG. Use to see inside designs without
     exporting STL + opening in a slicer — verify wall thickness,
     internal cavities, snap-fit clearances, screw-hole bottoms, ribs.
 
@@ -291,9 +349,12 @@ def render_section(
         - If the plane doesn't intersect the geometry, returns a
           placeholder PNG with the bbox extent so the caller can pick
           a valid ``at``. Does not raise.
-        - Section outline only (no filled material) in v0.2.6 — fill is
-          a planned v0.2.7 enhancement once we see what real workflows
-          need.
+        - v0.3.3: the cut material is filled (translucent) so solid vs.
+          void reads at a glance; the section outline is drawn on top.
+          Holes (e.g. a tube bore) are marked by their outline and read
+          as lighter regions. Fill is best-effort — if it fails the
+          render degrades to outline-only (v0.2.6 behavior) rather than
+          erroring.
     """
     if plane not in SECTION_PLANES:
         raise ValueError(
@@ -340,6 +401,13 @@ def render_section(
             f"(no intersection)"
         )
         return _fig_to_png(fig)
+
+    # v0.3.3: fill the cut material first so the outline draws on top of
+    # it. Best-effort — never let a fill failure break the render.
+    try:
+        _fill_section(ax, section_path3d, plot_axes)
+    except Exception:
+        pass
 
     # Project section vertices to 2D using the plot_axes indices.
     # This avoids trimesh.Path3D.to_planar()'s rotation matrix surprises;
