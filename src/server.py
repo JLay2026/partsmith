@@ -53,6 +53,11 @@ v0.2.7 (issue #3):
   GET /design/{name}/versions and GET /design/{name}/diff. Existing
   save/load/delete endpoints accept an optional version parameter.
   Backward-compatible with v0.2.4-v0.2.6 flat layout.
+
+v0.3.4 (issue #12):
+- Dimensioned engineering drawings. `render_drawing()` + POST
+  /render/drawing + partsmith_render_drawing MCP tool. Overall W/H
+  dimension lines + title block; the plain render_2d W/H overlay stays.
 """
 
 from __future__ import annotations
@@ -75,7 +80,13 @@ from .cad_engine import CADEngine
 from .design_store import DesignStore
 from .mcp_transport import build_mcp
 from .printability import analyze as analyze_printability
-from .renderer import render_2d, render_3d, render_multiview, render_section
+from .renderer import (
+    render_2d,
+    render_3d,
+    render_drawing,
+    render_multiview,
+    render_section,
+)
 
 WORKSPACE = Path(os.environ.get("PARTSMITH_WORKSPACE", "/workspace"))
 RENDERS = Path(os.environ.get("PARTSMITH_RENDERS", "/renders"))
@@ -180,6 +191,13 @@ class SectionRequest(BaseModel):
     plane: str = Field("YZ", pattern=r"^(XY|XZ|YZ)$")
     at: float = Field(0.0, ge=-10000.0, le=10000.0)
     with_dimensions: bool = True
+
+
+class DrawingRequest(BaseModel):
+    """v0.3.4: engineering drawing with overall dimension lines."""
+    name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
+    view: str = Field("front", pattern=r"^(front|back|left|right|top|bottom)$")
+    part_name: Optional[str] = Field(None, max_length=64)
 
 
 class ExportRequest(BaseModel):
@@ -316,6 +334,26 @@ def render_section_endpoint(req: SectionRequest):
         "path": str(path),
         "plane": req.plane,
         "at": req.at,
+        "base64": base64.b64encode(png).decode("ascii"),
+    }
+
+
+@app.post("/render/drawing")
+def render_drawing_endpoint(req: DrawingRequest):
+    """v0.3.4 (issue #12): engineering drawing with dimension lines."""
+    state = engine.get(req.name)
+    if not state or not state.shape:
+        raise HTTPException(404, f"No model '{req.name or 'active'}' found")
+    png = render_drawing(
+        state.shape,
+        view=req.view,
+        part_name=req.part_name or state.name,
+    )
+    path = RENDERS / f"{state.name}_drawing_{req.view}.png"
+    _safe_write(path, png, "drawing render")
+    return {
+        "path": str(path),
+        "view": req.view,
         "base64": base64.b64encode(png).decode("ascii"),
     }
 
