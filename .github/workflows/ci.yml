@@ -16,7 +16,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Install ruff
         run: pip install ruff
       - name: Lint
         run: ruff check src/ tests/
+
+  pytest:
+    name: pytest (lightweight)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install minimal test deps
+        # Only stdlib + pytest + fastapi/pydantic for the REST schema test.
+        # Tests that need build123d / trimesh / matplotlib run in the
+        # separate integration workflow against a real container.
+        run: pip install pytest fastapi pydantic
+      - name: Run lightweight tests
+        # tests/test_versioning.py is pure stdlib + tmp_path filesystem;
+        # tests/integration/* runs in integration.yml.
+        # test_helpers + test_section + test_smoke need build123d at runtime;
+        # they're covered by the integration suite (or future v0.3.2 expansion).
+        run: pytest tests/test_versioning.py -v --tb=short

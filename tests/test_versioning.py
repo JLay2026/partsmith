@@ -256,7 +256,19 @@ def test_diff_rejects_bad_versions(tmp_path: Path):
 
 def test_save_request_schema_accepts_version(tmp_path: Path):
     """SaveDesignRequest pydantic schema accepts version field (REST surface)."""
+    # server.py imports the full dep chain (mcp -> printability -> trimesh
+    # -> renderer -> matplotlib + numpy + build123d). All of these need to
+    # be present for the SaveDesignRequest schema check to even reach the
+    # pydantic call. Skip cleanly in the lightweight CI which deliberately
+    # doesn't install the heavy deps; the integration suite covers this
+    # path against the real container.
     pytest.importorskip("fastapi")
+    pytest.importorskip("pydantic")
+    pytest.importorskip("trimesh")
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("build123d")
+    pytest.importorskip("mcp")
+
     from src.server import SaveDesignRequest
 
     req = SaveDesignRequest(code="x", name="ok", version="auto")

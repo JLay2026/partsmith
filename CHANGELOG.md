@@ -4,78 +4,106 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.1] — 2026-06-10
+
+### Added
+- **`pytest` job in `.github/workflows/ci.yml`.** Runs lightweight
+  tests (`tests/test_versioning.py`) on every PR + push to main.
+  Installs only `pytest + fastapi + pydantic` (~10 sec); tests that
+  need build123d / trimesh / matplotlib run against the real container
+  via the integration workflow instead.
+- **`.github/workflows/integration.yml`.** New separate workflow that:
+  1. Builds the partsmith image from the current branch (Buildx +
+     GH Actions cache; ~30 sec on warm cache, ~5 min first time)
+  2. Starts the container on 127.0.0.1:8123, waits up to 90s for
+     `/health` to return 200
+  3. Runs `pytest tests/integration/` with `PARTSMITH_URL` set
+  4. Dumps `docker logs partsmith` on failure for diagnosis
+- **`tests/integration/`** suite (initial scaffold + 3 tests):
+  - `conftest.py` — `partsmith_url` fixture; skips if
+    `PARTSMITH_URL` env unset so local pytest discovery is harmless
+  - `test_health.py:test_health_returns_200_with_version` — REST
+    `/health` smoke. Catches v0.1.2-class deploy regressions
+    (port-bind failure, FastAPI lifespan crash, etc.)
+  - `test_mcp_handshake.py:test_mcp_initialize_returns_partsmith_serverinfo`
+    — POST `/mcp/` initialize. Catches v0.2.1 (lifespan / URL prefix),
+    v0.2.2 (DNS rebinding 421), v0.2.3 (stateful long-poll hang)
+    regressions
+  - `test_mcp_handshake.py:test_mcp_tools_list_includes_expected_surface`
+    — verifies the full v0.2.0 + v0.2.4 + v0.2.6 + v0.2.7 tool surface
+    is exposed; banded by version cohort so a missing tool is a clear
+    signal of which release regressed
+- **`requests>=2.28.0`** dev dependency for integration test HTTP client.
+
+### Deferred to a future patch (v0.3.2 or later)
+Issue [#5](https://github.com/JLay2026/partsmith/issues/5) originally
+scoped four integration test files. Shipped 2/4 here; the other 2 land
+as a follow-up once this framework has proven stable in CI for a week
+or two of actual PRs:
+
+- `test_mcp_tools.py` — full round-trip: initialize → call
+  `partsmith_create_model` with a cube → verify success + geometry +
+  preview_data_b64 → call `partsmith_export` → verify STL bytes
+  decodable. Higher complexity (chain of MCP tool calls), value is
+  important but deferred to keep the v0.3.1 ship surface tight.
+- `test_caddy_compat.py` — verify uvicorn handles `X-Forwarded-Proto:
+  https` correctly. Catches the v0.2.1 scheme-downgrade regression.
+  Easy to add but separate concern.
+
+### Design notes
+- **Two workflows, not one.** Lightweight CI (ruff + pytest) runs in
+  ~30 sec and gates every PR. Integration runs in 1-5 min and runs
+  alongside but doesn't block. Separation means a build123d API drift
+  doesn't sneak in just because pip cache went stale.
+- **`PARTSMITH_URL` env var, not testcontainers-python.** The
+  `testcontainers` library adds a dep, complicates local dev, and
+  doesn't materially simplify the CI workflow over plain
+  `docker run + curl + pytest`. Skipped per the project's
+  "small over capable" toolkit preference.
+- **Local-dev story preserved.** `conftest.py` skips if
+  `PARTSMITH_URL` is unset, so `pytest tests/integration/ -v` on a
+  laptop without a running container just says "skipped". Run with
+  `PARTSMITH_URL=http://127.0.0.1:8123 pytest tests/integration/ -v`
+  against a local container to validate before pushing.
+- **GH Actions cache for Docker layers.** `cache-from / cache-to type=gha`
+  on the buildx step means subsequent runs reuse the OpenCASCADE Python
+  wheel layer (the expensive part). First-PR build is ~5 min; rebuilds
+  on the same branch are ~30 sec.
+
+### Why
+v0.2.x shipped four deploy bugs (lifespan, double-prefix path, scheme
+downgrade, DNS rebinding) that would have been caught in 5 minutes by a
+container-based integration test. Cost was ~5 hours of evening debugging
+across the v0.2.0 → v0.2.3 cycle. This is the boring defensive layer
+that protects every future feature ship.
+
+Resolves the immediate ask of [#5](https://github.com/JLay2026/partsmith/issues/5)
+(pytest integration suite + GH Actions CI workflow exist + run on every
+PR). Two integration tests remain to land in a follow-up.
+
+Per ROADMAP Theme 4 ("Validated quality"). Fifth v0.3.x item to ship,
+and the one that protects investment in everything else.
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.2.7] — 2026-06-10
 
 ### Added
 - **Versioned designs.** Each design is now a directory of versions
   (`{workspace}/designs/{name}/v1.py + v1.json`, `v2.py + v2.json`, ...)
-  instead of a single overwrite-in-place pair. Iteration produces a
-  v1/v2/v3 trail you can compare.
+  instead of a single overwrite-in-place pair.
 - **`partsmith_list_versions(name)`** MCP tool + `GET /design/{name}/versions`
-  REST endpoint — returns the sorted version list for a design.
 - **`partsmith_diff_designs(name, v1, v2)`** MCP tool + `GET /design/{name}/diff`
-  REST endpoint. Returns:
-  - `source_diff`: unified diff text (3 lines of context)
-  - `volume_delta_mm3`: v2 - v1 (or null if either side lacks geometry)
-  - `surface_area_delta_mm2`: v2 - v1
-  - `bbox_size_delta_mm`: `[dx, dy, dz]` (v2 size - v1 size)
-  - `v1_metadata`, `v2_metadata`: full metadata dicts
-- **`version` parameter** on existing tools/endpoints:
-  - `partsmith_save_design(..., version="auto"|int)` — "auto" appends
-    next unused; int targets that slot (overwrites)
-  - `partsmith_load_design(..., version=None)` — None / unset = latest
-  - `partsmith_delete_design(..., version=None)` — None nukes all
-    versions + directory; int deletes just that version
-  - `POST /design/save` body accepts `version`; `GET /design/{name}`,
-    `DELETE /design/{name}`, `POST /design/{name}/load` accept
-    `?version=N` query param.
-- **`tests/test_versioning.py`** — 15 end-to-end tests covering save,
-  load, delete (per-version + all-versions), diff (source + geometry
-  deltas), list_all (latest-per-design), legacy layout read compat,
-  legacy auto-migration on first save, REST schema, error paths.
-
-### Backward compatibility
-- **Pre-v0.2.7 flat layout** (`designs/{name}.py + {name}.json`) is read
-  transparently as version 1. `list_versions("legacy_design")` returns
-  `[1]`, `load("legacy_design")` returns the legacy code.
-- **Auto-migration on next save.** When you save to a legacy design,
-  the flat files are moved to `designs/{name}/v1.py + v1.json`
-  (preserving created_at) and the new code lands as v2. Migration
-  happens once per design, in-place, with no data loss.
-- All existing v0.2.4-v0.2.6 callers (REST + MCP) work unchanged because
-  the new `version` params have backward-compatible defaults.
-
-### Design notes
-- **One directory per design.** Originally considered packing all
-  versions into one JSON file but rejected: source `.py` files stay
-  human-readable + grep-friendly + git-friendly that way.
-- **Explicit-version save overwrites.** No "version already exists,
-  refuse" — overwriting an existing version is a deliberate user
-  choice ("redo v3 cleanly"). Use auto for normal appending.
-- **created_at preserved on overwrite.** Even when you overwrite a
-  specific version slot, its original created_at is kept; only
-  last_modified bumps. So design history isn't lost by a re-save.
-- **Diff is geometry-aware but optional.** Deltas come from the
-  geometry snapshot saved at save time. If either version was saved
-  without geometry (or with corrupt metadata), deltas come back as
-  null with no error — the source diff is always available.
-- **Side-by-side render NOT in this PR.** Issue #3 lists "optional:
-  side-by-side render PNG" — deferring to v0.2.8 once we see whether
-  the metadata-delta approach is sufficient signal in real iteration.
-- **Triangle count NOT in delta.** Not currently captured in the
-  geometry snapshot. Adding it would require a measure() pass at save
-  time — out of scope, may add in v0.2.8 with side-by-side render.
-
-### Why
-"Is v3 actually better than v2 in the ways I care about?" requires
-side-by-side comparison. Without versioning every `create_model` clobbered
-prior work. With this, iteration becomes a tracked trail; geometry
-deltas give an at-a-glance answer ("v3 is 12% smaller volume, 0.5mm
-narrower in X — that's what I wanted").
+  — returns source diff + volume/surface-area/bbox deltas
+- **`version` parameter** on existing save/load/delete tools/endpoints
+- **`tests/test_versioning.py`** — 15 end-to-end tests
+- Backward-compatible with v0.2.4-v0.2.6 flat layout (auto-migrates
+  on first save)
 
 Resolves [#3](https://github.com/JLay2026/partsmith/issues/3).
-Fourth v0.3.0-era item to ship (after #2 design store in v0.2.4,
-#1 helpers in v0.2.5, #8 cross-section in v0.2.6).
 
 ### Commit
 See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
@@ -86,10 +114,9 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 
 ### Added
 - **`src/renderer.py:render_section()`** — 2D cross-section through a
-  build123d Shape on the XY/XZ/YZ planes at a given `at` offset (mm).
+  build123d Shape on the XY/XZ/YZ planes.
 - **`POST /render/section`** REST endpoint + **`partsmith_render_section`**
   MCP tool.
-- **`tests/test_section.py`** — signature/contract tests.
 
 Resolves [#8](https://github.com/JLay2026/partsmith/issues/8).
 
