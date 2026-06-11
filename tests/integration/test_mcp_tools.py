@@ -182,3 +182,43 @@ def test_render_section_via_mcp(partsmith_url):
     assert result.get("inline") is True, f"Expected inline PNG, got {result!r}"
     png = base64.b64decode(result["data_b64"])
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "section render is not a PNG"
+
+
+def test_render_drawing_via_mcp(partsmith_url):
+    """create_model -> render_drawing returns an inline PNG (v0.3.4 tool live)."""
+    init = _initialize(partsmith_url)
+    assert init.status_code == 200
+
+    _rpc(
+        partsmith_url,
+        "tools/call",
+        {
+            "name": "partsmith_create_model",
+            "arguments": {
+                "code": "from build123d import *\nresult = Box(50, 20, 30)",
+                "name": "ci-drawing-box",
+            },
+        },
+        req_id=2,
+    )
+
+    drawing = _rpc(
+        partsmith_url,
+        "tools/call",
+        {
+            "name": "partsmith_render_drawing",
+            "arguments": {
+                "name": "ci-drawing-box",
+                "view": "front",
+                "part_name": "ci-drawing-box",
+            },
+        },
+        req_id=3,
+    )
+    assert drawing.status_code == 200, (
+        f"render_drawing call returned {drawing.status_code}: {drawing.text[:300]}"
+    )
+    result = _tool_result_dict(drawing.json())
+    assert result.get("inline") is True, f"Expected inline PNG, got {result!r}"
+    png = base64.b64decode(result["data_b64"])
+    assert png[:8] == b"\x89PNG\r\n\x1a\n", "drawing render is not a PNG"

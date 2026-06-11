@@ -16,6 +16,12 @@ the chat.
 v0.3.3 (issue #13): render_section() now fills the cut material so
 solid vs. void reads at a glance. Fill is best-effort — any failure
 falls back to the v0.2.6 outline-only render rather than erroring.
+
+v0.3.4 (issue #12): adds render_drawing() — an engineering-style 2D
+drawing with overall width/height dimension lines (extension lines +
+arrowheads + measured values) and a title block. Answers "is this
+bracket actually 50 mm wide?" from the render, before slicing. The
+simple W/H text overlay on render_2d stays as-is.
 """
 
 from __future__ import annotations
@@ -23,7 +29,8 @@ from __future__ import annotations
 import io
 import os
 import tempfile
-from typing import Any
+from datetime import date
+from typing import Any, Optional
 
 import matplotlib
 
@@ -79,6 +86,8 @@ DEFAULT_EDGE_COLOR = "#3a4a5e"
 # Fill color for cut material in cross-sections (v0.3.3). Warmer than
 # the body so a section reads as "this is the cut face" at a glance.
 DEFAULT_SECTION_FILL = "#c98f6b"
+# Dimension annotation color for engineering drawings (v0.3.4).
+DEFAULT_DIM_COLOR = "#1a1a1a"
 # Light from upper-right-front; normalized below.
 DEFAULT_LIGHT_DIR = np.array([0.5, -0.3, 0.85])
 DEFAULT_AMBIENT = 0.30  # 30% floor so back-facing tris aren't black
@@ -462,5 +471,171 @@ def render_section(
             va="top", ha="left",
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
         )
+
+    return _fig_to_png(fig)
+
+
+# ── v0.3.4 (issue #12): engineering drawing with dimension lines ──────
+
+def _draw_overall_dimensions(
+    ax,
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    color: str = DEFAULT_DIM_COLOR,
+) -> None:
+    """Draw overall width (bottom) + height (left) dimension lines.
+
+    Engineering convention: extension lines run from the part edges out
+    to the dimension line; the dimension line itself is a double-headed
+    arrow spanning the measured extent; the measured value sits centered
+    on it in a small white box so it stays legible over the part.
+
+    Pure 2D matplotlib — operates on already-projected bbox extents, so
+    it's view-agnostic and unit-testable without any CAD stack.
+    """
+    width = xmax - xmin
+    height = ymax - ymin
+    span = max(width, height, 1e-6)
+
+    gap = 0.10 * span          # part edge -> dimension line offset
+    overshoot = 0.03 * span    # extension line past the dimension line
+    stub = 0.012 * span        # small gap between part and extension line
+
+    arrowprops = dict(arrowstyle="<|-|>", color=color,
+                      linewidth=1.0, mutation_scale=12, shrinkA=0, shrinkB=0)
+
+    # ── Width dimension (below the part) ──
+    dim_y = ymin - gap
+    # Extension lines (vertical) from just below the part down past dim line
+    for x in (xmin, xmax):
+        ax.plot([x, x], [ymin - stub, dim_y - overshoot],
+                color=color, linewidth=0.7)
+    # Dimension line (double arrow)
+    ax.annotate("", xy=(xmax, dim_y), xytext=(xmin, dim_y),
+                arrowprops=arrowprops)
+    # Measured value, centered, white box so it reads over the arrow
+    ax.text((xmin + xmax) / 2.0, dim_y, f"{width:.2f}",
+            ha="center", va="center", fontsize=10, color=color,
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
+                      edgecolor="none", alpha=0.9))
+
+    # ── Height dimension (left of the part) ──
+    dim_x = xmin - gap
+    for y in (ymin, ymax):
+        ax.plot([xmin - stub, dim_x - overshoot], [y, y],
+                color=color, linewidth=0.7)
+    ax.annotate("", xy=(dim_x, ymax), xytext=(dim_x, ymin),
+                arrowprops=arrowprops)
+    ax.text(dim_x, (ymin + ymax) / 2.0, f"{height:.2f}",
+            ha="center", va="center", fontsize=10, color=color,
+            rotation=90,
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
+                      edgecolor="none", alpha=0.9))
+
+
+def _draw_title_block(
+    ax,
+    part_name: str,
+    units: str,
+    scale_text: str,
+    view: str,
+) -> None:
+    """Draw a compact title block in the lower-right (axes coords)."""
+    lines = (
+        f"PART: {part_name}\n"
+        f"VIEW: {view.upper()}    UNITS: {units}\n"
+        f"SCALE: {scale_text}    DATE: {date.today().isoformat()}"
+    )
+    ax.text(
+        0.99, 0.01, lines,
+        transform=ax.transAxes,
+        ha="right", va="bottom",
+        fontsize=8, family="monospace", color=DEFAULT_DIM_COLOR,
+        bbox=dict(boxstyle="square,pad=0.4", facecolor="white",
+                  edgecolor=DEFAULT_DIM_COLOR, linewidth=0.8),
+    )
+
+
+def render_drawing(
+    shape: Any,
+    view: str = "front",
+    size: tuple[int, int] = (1000, 750),
+    part_name: Optional[str] = None,
+) -> bytes:
+    """Render an engineering-style dimensioned 2D drawing. Returns PNG.
+
+    Unlike render_2d (which overlays a plain W/H text box), this draws
+    proper overall dimension lines — extension lines, double-headed
+    arrows, and the measured width/height centered on each — plus a
+    title block. Use it to confirm a part's real size before slicing:
+    "is this bracket actually 50 mm wide at the mounting face?".
+
+    Args:
+        shape: build123d Shape / Part / Solid / Compound.
+        view: One of front/back/left/right/top/bottom (same ortho
+            projections as render_2d). Default "front".
+        size: Output PNG (width, height) in pixels.
+        part_name: Title-block part name. Defaults to "—" if not given.
+
+    Returns:
+        PNG bytes.
+
+    Notes:
+        - Overall width + height only in v0.3.4. Feature callouts (hole
+          diameters, center-to-center spacing) are a planned follow-up:
+          reliable circle detection from a triangulated mesh is the
+          risky part and is deferred until a real design needs it
+          (issue #12).
+        - Stays on matplotlib/Agg — no new dependency.
+    """
+    mesh = _shape_to_trimesh(shape)
+    axes, mirror, xlabel, ylabel = VIEW_PROJECTIONS_2D.get(
+        view, VIEW_PROJECTIONS_2D["front"]
+    )
+    verts2d = mesh.vertices[:, list(axes)] * np.array(mirror)
+
+    xmin, ymin = verts2d.min(axis=0)
+    xmax, ymax = verts2d.max(axis=0)
+    width = float(xmax - xmin)
+    height = float(ymax - ymin)
+    span = max(width, height, 1e-6)
+
+    fig, ax = plt.subplots(figsize=(size[0] / 100, size[1] / 100), dpi=100)
+
+    # The part itself (light fill so dimension lines read clearly on top)
+    tris = verts2d[mesh.faces]
+    pc = PolyCollection(
+        tris,
+        alpha=0.25,
+        facecolor=DEFAULT_BASE_COLOR,
+        edgecolor=DEFAULT_EDGE_COLOR,
+        linewidth=0.4,
+    )
+    ax.add_collection(pc)
+
+    # Dimension annotations (operate on projected bbox extents)
+    _draw_overall_dimensions(ax, float(xmin), float(xmax),
+                             float(ymin), float(ymax))
+
+    # Title block. Scale is 1:1 (drawing is in mm at true coords here).
+    _draw_title_block(
+        ax,
+        part_name=part_name or "—",
+        units="mm",
+        scale_text="1:1",
+        view=view,
+    )
+
+    # Expand limits so dimension lines + labels aren't clipped.
+    pad = 0.22 * span
+    ax.set_xlim(xmin - pad, xmax + 0.10 * span)
+    ax.set_ylim(ymin - pad, ymax + 0.10 * span)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"{view.upper()} — dimensioned drawing")
+    ax.grid(True, alpha=0.25, linestyle="--")
 
     return _fig_to_png(fig)

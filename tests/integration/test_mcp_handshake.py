@@ -8,7 +8,8 @@ Catches the four v0.2.x deploy regressions:
 - v0.2.2: DNS rebinding 421 (rejected non-localhost Host)
 - v0.2.3: stateful long-poll hangs (Cowork 2-17 min hang)
 
-Plus surface-area checks for tool additions in v0.2.4, v0.2.6, v0.2.7.
+Plus surface-area checks for tool additions in v0.2.4, v0.2.6, v0.2.7,
+v0.3.4.
 """
 
 import requests
@@ -128,4 +129,9 @@ def test_mcp_tools_list_includes_expected_surface(partsmith_url):
     missing_versioning = versioning - tool_names
     assert not missing_versioning, (
         f"Missing v0.2.7 versioning tools: {missing_versioning}"
+    )
+
+    # Dimensioned drawing (v0.3.4)
+    assert "partsmith_render_drawing" in tool_names, (
+        "Missing v0.3.4 partsmith_render_drawing"
     )

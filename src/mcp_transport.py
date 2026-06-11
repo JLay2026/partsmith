@@ -7,6 +7,7 @@ v0.2.4: design store tools (save/load/list/delete).
 v0.2.6 (issue #8): partsmith_render_section.
 v0.2.7 (issue #3): partsmith_list_versions, partsmith_diff_designs.
                    save/load/delete tools accept optional version.
+v0.3.4 (issue #12): partsmith_render_drawing (dimensioned 2D drawing).
 """
 from __future__ import annotations
 
@@ -21,7 +22,13 @@ from . import __version__
 from .cad_engine import CADEngine
 from .design_store import DesignStore
 from .printability import analyze as analyze_printability
-from .renderer import render_2d, render_3d, render_multiview, render_section
+from .renderer import (
+    render_2d,
+    render_3d,
+    render_drawing,
+    render_multiview,
+    render_section,
+)
 
 INLINE_MAX_BYTES = int(
     os.environ.get("PARTSMITH_INLINE_MAX_BYTES", str(8 * 1024 * 1024))
@@ -186,6 +193,37 @@ def build_mcp(
         return _file_response(
             png, f"{name}_section_{plane}_{at_label}.png", "image/png",
         )
+
+    @mcp.tool()
+    def partsmith_render_drawing(
+        name: str = "default",
+        view: str = "front",
+        part_name: str = "",
+    ) -> dict:
+        """Render an engineering-style dimensioned 2D drawing.
+
+        Unlike partsmith_render_2d (which overlays a plain W/H text box),
+        this draws proper overall dimension lines -- extension lines,
+        double-headed arrows, and the measured width/height centered on
+        each -- plus a title block. Use it to confirm a part's real size
+        before slicing ("is this bracket actually 50 mm wide?").
+
+        Args:
+            name: Model identifier (default "default").
+            view: One of front, back, left, right, top, bottom.
+                  Default "front".
+            part_name: Title-block part name. Defaults to the model name.
+
+        Overall width + height only in v0.3.4. Feature callouts (hole
+        diameters, center-to-center spacing) are a planned follow-up.
+        """
+        state, err = _need_shape(name)
+        if err:
+            return err
+        png = render_drawing(
+            state.shape, view=view, part_name=(part_name or name),
+        )
+        return _file_response(png, f"{name}_drawing_{view}.png", "image/png")
 
     @mcp.tool()
     def partsmith_export(name: str = "default", format: str = "stl") -> dict:
@@ -363,6 +401,8 @@ def build_mcp(
             volume_delta_mm3: v2 volume - v1 volume (or null)
             surface_area_delta_mm2: v2 - v1 (or null)
             bbox_size_delta_mm: [dx, dy, dz] (v2 - v1) or null
+            face_count_delta / edge_count_delta / vertex_count_delta:
+                B-rep topology deltas (v0.3.3; null if not captured)
             v1_metadata, v2_metadata: full metadata dicts
 
         Negative deltas mean v2 is smaller/lighter than v1.

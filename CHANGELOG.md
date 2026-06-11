@@ -4,6 +4,51 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.4] — 2026-06-11
+
+### Added
+- **Dimensioned engineering drawings** (`src/renderer.py`
+  `render_drawing()`). A new render that draws proper overall
+  **width + height dimension lines** — extension lines, double-headed
+  arrows, and the measured value centered on each — plus a **title
+  block** (part name, view, units, scale, date). Answers "is this
+  bracket actually 50 mm wide?" from the render, before slicing.
+- **`POST /render/drawing`** REST endpoint + **`partsmith_render_drawing`**
+  MCP tool (`name`, `view`, `part_name`). The existing `render_2d`
+  plain W/H text overlay is unchanged — this is a separate, richer tool.
+- **`tests/integration/test_mcp_tools.py::test_render_drawing_via_mcp`**
+  — drives the new tool end-to-end against the real container and
+  asserts a valid PNG. Tool-surface check in `test_mcp_handshake.py`
+  extended to require `partsmith_render_drawing`.
+
+### Design notes
+- **New tool, not a mode flag.** Per the issue's lean, drawings are a
+  dedicated `render_drawing` rather than a `with_dimensions="engineering"`
+  mode on `render_2d`, so the simple overlay stays available and the
+  two concerns don't entangle.
+- **Overall dims only in v0.3.4.** Feature callouts (hole diameters,
+  center-to-center spacing) are deferred: reliable circle detection
+  from a *triangulated mesh* is the risky part, and per "earn the
+  feature with real demand" it waits until a real design needs it.
+  Overall W/H covers the 90% "did I get the size right" check.
+- **Dimension drawing is pure 2D matplotlib** operating on the
+  projected bbox extents (`_draw_overall_dimensions`), so it's
+  view-agnostic and was unit-validated against synthetic geometry
+  before wiring to the CAD stack. No new dependency.
+
+### Why
+Sprint A / Theme 2 (output fidelity). Cross-sections (v0.2.6/v0.3.3)
+let you see *inside* a part; dimensioned drawings let you verify its
+*size*. Together they close the "looks right but is it right" gap
+before a print is committed.
+
+Resolves [#12](https://github.com/JLay2026/partsmith/issues/12).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.3.3] — 2026-06-11
 
 ### Added
