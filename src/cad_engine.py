@@ -11,6 +11,11 @@ v0.2.5 (issue #1): auto-injects partsmith_helpers into the build123d
 execution namespace. Tool calls can now use through_hole(), screw_hole(),
 slot(), chamfer_edges(), etc. without explicit imports. See
 partsmith_helpers.py for the full helper set.
+
+v0.3.3 (issue #13): the geometry summary now carries B-rep topology
+counts (face_count / edge_count / vertex_count) so a saved design's
+snapshot lets the version diff report complexity deltas. B-rep counts
+are deterministic, unlike mesh triangle counts (tessellation-dependent).
 """
 
 from __future__ import annotations
@@ -64,6 +69,17 @@ class ModelState:
                     round(self.shape.area, 3) if hasattr(self.shape, "area") else None
                 ),
             }
+            # v0.3.3 (issue #13): B-rep topology counts. Inner try/except
+            # so a count failure on odd geometry never costs us the
+            # bbox/volume snapshot above. These persist into a saved
+            # design's metadata.geometry and power the diff's
+            # face_count_delta / edge_count_delta / vertex_count_delta.
+            try:
+                out["geometry"]["face_count"] = len(self.shape.faces())
+                out["geometry"]["edge_count"] = len(self.shape.edges())
+                out["geometry"]["vertex_count"] = len(self.shape.vertices())
+            except Exception:
+                pass
         except Exception:
             pass
         return out

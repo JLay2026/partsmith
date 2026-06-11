@@ -202,6 +202,59 @@ def test_diff_geometry_deltas(tmp_path: Path):
     assert d["bbox_size_delta_mm"] == [10.0, 10.0, 10.0]
 
 
+def test_diff_topology_deltas(tmp_path: Path):
+    """v0.3.3 (#13): diff computes face/edge/vertex deltas when both
+    versions captured B-rep topology counts in their geometry snapshot."""
+    from src.design_store import DesignStore
+
+    s = DesignStore(workspace=tmp_path)
+    # A plain box: 6 faces / 12 edges / 8 vertices.
+    geo_box = {
+        "volume_mm3": 1000.0,
+        "face_count": 6,
+        "edge_count": 12,
+        "vertex_count": 8,
+    }
+    # After adding a through-hole the B-rep gains faces/edges/vertices.
+    geo_box_hole = {
+        "volume_mm3": 900.0,
+        "face_count": 9,
+        "edge_count": 18,
+        "vertex_count": 12,
+    }
+    s.save("blk", "box code", geometry=geo_box)
+    s.save("blk", "box+hole code", geometry=geo_box_hole)
+
+    d = s.diff("blk", v1=1, v2=2)
+    assert d["face_count_delta"] == 3   # 9 - 6
+    assert d["edge_count_delta"] == 6   # 18 - 12
+    assert d["vertex_count_delta"] == 4  # 12 - 8
+    # Negative volume delta: hole removed material.
+    assert d["volume_delta_mm3"] == -100.0
+
+
+def test_diff_topology_deltas_missing(tmp_path: Path):
+    """Topology deltas are None when either version lacks the counts
+    (e.g. designs saved by pre-v0.3.3 servers)."""
+    from src.design_store import DesignStore
+
+    s = DesignStore(workspace=tmp_path)
+    # v1 pre-v0.3.3 (no counts), v2 v0.3.3+ (has counts)
+    s.save("p", "v1", geometry={"volume_mm3": 100.0})
+    s.save(
+        "p", "v2",
+        geometry={"volume_mm3": 120.0, "face_count": 6,
+                  "edge_count": 12, "vertex_count": 8},
+    )
+
+    d = s.diff("p", v1=1, v2=2)
+    assert d["face_count_delta"] is None
+    assert d["edge_count_delta"] is None
+    assert d["vertex_count_delta"] is None
+    # Volume delta still works (both sides have it).
+    assert d["volume_delta_mm3"] == 20.0
+
+
 def test_diff_handles_missing_geometry(tmp_path: Path):
     """diff returns None for deltas when either side lacks geometry."""
     from src.design_store import DesignStore
@@ -214,6 +267,10 @@ def test_diff_handles_missing_geometry(tmp_path: Path):
     assert d["volume_delta_mm3"] is None
     assert d["surface_area_delta_mm2"] is None
     assert d["bbox_size_delta_mm"] is None
+    # New v0.3.3 fields also None-safe.
+    assert d["face_count_delta"] is None
+    assert d["edge_count_delta"] is None
+    assert d["vertex_count_delta"] is None
 
 
 def test_list_all_returns_latest_per_design(tmp_path: Path):
