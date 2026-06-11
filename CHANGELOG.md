@@ -4,6 +4,70 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.2] — 2026-06-11
+
+### Added
+- **`tests/integration/test_mcp_tools.py`** — full MCP tool-call
+  round-trip (the deferred half of #5):
+  - `test_create_model_then_export_roundtrip` — initialize → call
+    `partsmith_create_model` with a 20 mm cube → assert
+    `success` + geometry (8000 mm³, 20×20×20 bbox) + a real PNG in
+    `preview_data_b64` → call `partsmith_export` (STL) → assert the
+    returned base64 decodes to valid STL bytes.
+  - `test_render_section_via_mcp` — proves the v0.2.6 cross-section
+    tool executes against the real trimesh stack in the container and
+    returns an inline PNG.
+  - `_tool_result_dict()` helper parses the FastMCP tools/call response
+    defensively (`structuredContent` or `content[0].text` JSON) so the
+    tests aren't coupled to one FastMCP wrapping.
+- **`tests/integration/test_caddy_compat.py`** — reverse-proxy header
+  compatibility (the other deferred half of #5):
+  - `test_forwarded_headers_accepted` — `/health` with
+    `X-Forwarded-Proto/-For/-Host` returns 200 (proves
+    `--forwarded-allow-ips` parses rather than rejects the headers).
+  - `test_redirect_preserves_https_scheme` — GET `/mcp` (no trailing
+    slash) under `X-Forwarded-Proto: https` must redirect to an
+    `https://` Location, directly guarding the v0.2.1 scheme-downgrade
+    regression. Skips (rather than false-fails) if the build doesn't
+    redirect that path or emits a relative Location — the regression
+    only manifests as an absolute `http://` Location.
+
+### Completes
+Issue [#5](https://github.com/JLay2026/partsmith/issues/5) is now fully
+delivered: all four originally-scoped integration test files exist
+(`test_health`, `test_mcp_handshake` in v0.3.1; `test_mcp_tools`,
+`test_caddy_compat` here). The integration workflow now exercises the
+transport, the tool inventory, real tool execution, and proxy-header
+handling on every PR.
+
+### Design notes
+- **Defensive result parsing.** FastMCP's exact tools/call response
+  shape (structuredContent vs. content[0].text) varies by version;
+  `_tool_result_dict()` handles both so a FastMCP bump doesn't
+  spuriously break the round-trip test.
+- **Conditional skip on the scheme test.** The slash-redirect behavior
+  is server/version-dependent; the test guards the regression when the
+  redirect exists and skips cleanly otherwise rather than asserting on
+  behavior that may not be present. The baseline
+  `test_forwarded_headers_accepted` always runs.
+- **Still no new runtime deps.** Tests use `requests` (already a dev
+  dep since v0.3.1). The integration container has the full stack;
+  these tests just drive it over HTTP.
+
+### Why
+v0.3.1 shipped the CI framework + transport/inventory tests but
+deferred the two heavier tests to keep that ship tight. With the
+framework proven green across the v0.3.1 merge, completing the suite
+now means real tool execution + proxy-header handling are both under
+regression guard before Theme 2 (output fidelity) work begins.
+
+Per ROADMAP Theme 4 ("Validated quality").
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.3.1] — 2026-06-10
 
 ### Added
