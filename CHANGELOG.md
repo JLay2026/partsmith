@@ -4,54 +4,94 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.2.7] — 2026-06-10
+
+### Added
+- **Versioned designs.** Each design is now a directory of versions
+  (`{workspace}/designs/{name}/v1.py + v1.json`, `v2.py + v2.json`, ...)
+  instead of a single overwrite-in-place pair. Iteration produces a
+  v1/v2/v3 trail you can compare.
+- **`partsmith_list_versions(name)`** MCP tool + `GET /design/{name}/versions`
+  REST endpoint — returns the sorted version list for a design.
+- **`partsmith_diff_designs(name, v1, v2)`** MCP tool + `GET /design/{name}/diff`
+  REST endpoint. Returns:
+  - `source_diff`: unified diff text (3 lines of context)
+  - `volume_delta_mm3`: v2 - v1 (or null if either side lacks geometry)
+  - `surface_area_delta_mm2`: v2 - v1
+  - `bbox_size_delta_mm`: `[dx, dy, dz]` (v2 size - v1 size)
+  - `v1_metadata`, `v2_metadata`: full metadata dicts
+- **`version` parameter** on existing tools/endpoints:
+  - `partsmith_save_design(..., version="auto"|int)` — "auto" appends
+    next unused; int targets that slot (overwrites)
+  - `partsmith_load_design(..., version=None)` — None / unset = latest
+  - `partsmith_delete_design(..., version=None)` — None nukes all
+    versions + directory; int deletes just that version
+  - `POST /design/save` body accepts `version`; `GET /design/{name}`,
+    `DELETE /design/{name}`, `POST /design/{name}/load` accept
+    `?version=N` query param.
+- **`tests/test_versioning.py`** — 15 end-to-end tests covering save,
+  load, delete (per-version + all-versions), diff (source + geometry
+  deltas), list_all (latest-per-design), legacy layout read compat,
+  legacy auto-migration on first save, REST schema, error paths.
+
+### Backward compatibility
+- **Pre-v0.2.7 flat layout** (`designs/{name}.py + {name}.json`) is read
+  transparently as version 1. `list_versions("legacy_design")` returns
+  `[1]`, `load("legacy_design")` returns the legacy code.
+- **Auto-migration on next save.** When you save to a legacy design,
+  the flat files are moved to `designs/{name}/v1.py + v1.json`
+  (preserving created_at) and the new code lands as v2. Migration
+  happens once per design, in-place, with no data loss.
+- All existing v0.2.4-v0.2.6 callers (REST + MCP) work unchanged because
+  the new `version` params have backward-compatible defaults.
+
+### Design notes
+- **One directory per design.** Originally considered packing all
+  versions into one JSON file but rejected: source `.py` files stay
+  human-readable + grep-friendly + git-friendly that way.
+- **Explicit-version save overwrites.** No "version already exists,
+  refuse" — overwriting an existing version is a deliberate user
+  choice ("redo v3 cleanly"). Use auto for normal appending.
+- **created_at preserved on overwrite.** Even when you overwrite a
+  specific version slot, its original created_at is kept; only
+  last_modified bumps. So design history isn't lost by a re-save.
+- **Diff is geometry-aware but optional.** Deltas come from the
+  geometry snapshot saved at save time. If either version was saved
+  without geometry (or with corrupt metadata), deltas come back as
+  null with no error — the source diff is always available.
+- **Side-by-side render NOT in this PR.** Issue #3 lists "optional:
+  side-by-side render PNG" — deferring to v0.2.8 once we see whether
+  the metadata-delta approach is sufficient signal in real iteration.
+- **Triangle count NOT in delta.** Not currently captured in the
+  geometry snapshot. Adding it would require a measure() pass at save
+  time — out of scope, may add in v0.2.8 with side-by-side render.
+
+### Why
+"Is v3 actually better than v2 in the ways I care about?" requires
+side-by-side comparison. Without versioning every `create_model` clobbered
+prior work. With this, iteration becomes a tracked trail; geometry
+deltas give an at-a-glance answer ("v3 is 12% smaller volume, 0.5mm
+narrower in X — that's what I wanted").
+
+Resolves [#3](https://github.com/JLay2026/partsmith/issues/3).
+Fourth v0.3.0-era item to ship (after #2 design store in v0.2.4,
+#1 helpers in v0.2.5, #8 cross-section in v0.2.6).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.2.6] — 2026-06-10
 
 ### Added
 - **`src/renderer.py:render_section()`** — 2D cross-section through a
   build123d Shape on the XY/XZ/YZ planes at a given `at` offset (mm).
-  Uses `trimesh.Trimesh.section()` for the mesh-plane intersection;
-  manual axis projection (not `Path3D.to_planar()`) so the 2D axes
-  stay aligned with user expectations (Y→horizontal, Z→vertical for
-  the default YZ plane, etc.).
-- **`POST /render/section`** REST endpoint. Request:
-  `{"name": "...", "plane": "YZ"|"XZ"|"XY", "at": 0.0, "with_dimensions": true}`.
-  Returns `{"path": ..., "plane": ..., "at": ..., "base64": ...}`.
-- **`partsmith_render_section`** MCP tool with detailed plane-convention
-  docstring (LLM-readable so the tool selects appropriate `at` values).
-- **`tests/test_section.py`** — signature/contract tests
-  (4 tests): render_section signature, plane-string validation,
-  SECTION_PLANES table consistency, SectionRequest pydantic schema.
-
-### Design notes
-- **Outline-only sections in v0.2.6.** Filled material rendering (via
-  shapely polygons from `Path2D.polygons_full`) deferred to a possible
-  v0.2.7 — wanted to ship the highest-leverage piece (visibility into
-  internal geometry) first; aesthetic fill comes once we see what real
-  designs need.
-- **No-intersection placeholder, not 500.** When `at` is outside the
-  geometry's bbox along the plane's normal, returns a PNG with the
-  valid range so the LLM can self-correct. Same for degenerate
-  tangent-to-face sections.
-- **Manual axis projection** instead of `trimesh.Path3D.to_planar()` to
-  avoid rotation-matrix surprises that would mismatch axis labels
-  ("X (mm)" but actually plotting Y, etc.).
-- **`SECTION_PLANES` table** as single source of truth for plane defs;
-  any future plane (e.g. arbitrary diagonal) plugs in here. Validated
-  for internal consistency by `test_section_planes_constant_complete`.
-
-### Why
-Per ROADMAP Theme 2 (output fidelity) — current iso renders confirm
-"not garbage" but you can't tell whether wall thickness, screw hole
-position, or fillet radius is right. Cross-sections close that gap
-inline in the chat (no STL export + Bambu Studio round-trip).
-
-Ranked highest of all open backlog items for in-line viz impact in the
-"what improves iterative design + viz" review on 2026-06-10 after the
-v0.2.5 ship.
+- **`POST /render/section`** REST endpoint + **`partsmith_render_section`**
+  MCP tool.
+- **`tests/test_section.py`** — signature/contract tests.
 
 Resolves [#8](https://github.com/JLay2026/partsmith/issues/8).
-Third v0.3.0-era item to ship (after #2 design store in v0.2.4 and
-#1 helpers in v0.2.5).
 
 ### Commit
 See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
@@ -61,22 +101,10 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.5] — 2026-06-10
 
 ### Added
-- **`src/partsmith_helpers.py`** — reusable build123d patterns,
-  auto-injected into the build123d execution namespace by
-  `CADEngine.execute_code`. Seven helpers shipped:
-  - **Hole helpers:** `through_hole(diameter, depth)`,
-    `screw_hole(diameter, depth, countersink=True, head_diameter=None,
-    countersink_angle=90)`, `hex_hole(across_flats, depth)`
-  - **Slot helper:** `slot(length, width, depth)` — stadium-shaped
-  - **Edge treatment:** `chamfer_edges(part, radius, edges='all')`,
-    `fillet_top_edges(part, radius)`
-  - **Pattern helper:** `screw_pattern(positions, hole_func)`
-- **`tests/test_helpers.py`** — lightweight smoke tests for helper
-  surface.
-
-### Why
-Author ergonomics is the highest-leverage v0.3 theme. Reduces
-boilerplate for common 3D-printing patterns.
+- **`src/partsmith_helpers.py`** — 7 reusable build123d patterns
+  (through_hole, screw_hole, hex_hole, slot, chamfer_edges,
+  fillet_top_edges, screw_pattern) auto-injected into the build123d
+  execution namespace.
 
 Resolves [#1](https://github.com/JLay2026/partsmith/issues/1).
 
@@ -88,18 +116,14 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.4] — 2026-06-09
 
 ### Added
-- **Persistent design store** (`src/design_store.py`). Designs are
-  saved to disk under `{workspace}/designs/` as `{name}.py` (source) +
-  `{name}.json` (metadata). Survive container restart; models are
-  still in-memory only.
+- **Persistent design store** (`src/design_store.py`). Flat layout:
+  `{workspace}/designs/{name}.py + {name}.json`. Survives container
+  restart.
 - **4 new MCP tools:** `partsmith_save_design`, `partsmith_load_design`,
   `partsmith_list_designs`, `partsmith_delete_design`.
 - **5 new REST endpoints** under `/design/...`.
 
 Resolves [#2](https://github.com/JLay2026/partsmith/issues/2).
-
-### Commit
-See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 
 ---
 
@@ -118,8 +142,7 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.2] — 2026-06-09
 
 ### Fixed
-- **DNS rebinding protection disabled on the /mcp transport.** Was
-  rejecting any non-localhost Host header with 421.
+- **DNS rebinding protection disabled on the /mcp transport.**
 
 ### Commit
 [`07883e7`](https://github.com/JLay2026/partsmith/commit/07883e7e3f94bde2f4e0eb316888782b9f1b9ad2)
@@ -156,8 +179,7 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.1.3] — 2026-06-08
 
 ### Fixed
-- **All disk-write paths catch `OSError` and surface meaningful 500s**
-  with the affected path + the expected uid for the chown fix.
+- **All disk-write paths catch `OSError` and surface meaningful 500s.**
 
 ### Commit
 [`83a4a65`](https://github.com/JLay2026/partsmith/commit/83a4a65d11712d60de34b391031cb6c45cc2e6a3)
