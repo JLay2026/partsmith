@@ -44,6 +44,12 @@ v0.2.4:
   `/design/...` and 4 new MCP tools (`partsmith_save_design`,
   `partsmith_load_design`, `partsmith_list_designs`,
   `partsmith_delete_design`). See ROADMAP.md Theme 1 / issue #2.
+
+v0.2.6 (issue #8):
+- Cross-section renderer. New `render_section()` in renderer.py and
+  the matching POST /render/section endpoint here. Lets you see
+  inside designs (internal cavities, wall thickness, screw-hole
+  bottoms) without exporting STL + opening in Bambu Studio.
 """
 
 from __future__ import annotations
@@ -66,7 +72,7 @@ from .cad_engine import CADEngine
 from .design_store import DesignStore
 from .mcp_transport import build_mcp
 from .printability import analyze as analyze_printability
-from .renderer import render_2d, render_3d, render_multiview
+from .renderer import render_2d, render_3d, render_multiview, render_section
 
 WORKSPACE = Path(os.environ.get("PARTSMITH_WORKSPACE", "/workspace"))
 RENDERS = Path(os.environ.get("PARTSMITH_RENDERS", "/renders"))
@@ -150,51 +156,20 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 # ── App initialization (order matters for MCP lifespan) ──────────────
-#
-# FastMCP's StreamableHTTPSessionManager must run inside an async
-# context (`async with sm.run(): ...`). FastAPI's lifespan doesn't
-# propagate to apps mounted via `app.mount()`, so we have to:
-#   1. Build the MCP server + engine + store first
-#   2. Set streamable_http_path = "/" so the mounted URL is clean
-#   3. Disable DNS rebinding protection (v0.2.2)
-#   4. Switch to stateless + json_response mode (v0.2.3)
-#   5. Call streamable_http_app() to lazily init the session manager
-#   6. Wire session_manager.run() into FastAPI's lifespan kwarg
-#   7. Construct the FastAPI app with that lifespan
-#   8. Mount the MCP sub-app
-#
-# Without step 6 every MCP request crashes with
-# `RuntimeError: Task group is not initialized. Make sure to use run().`
 
 engine = CADEngine(workspace=WORKSPACE)
 store = DesignStore(workspace=WORKSPACE)  # v0.2.4
 _mcp_server = build_mcp(engine, WORKSPACE, store)
 
-# Default streamable_http_path is "/mcp". Combined with our outer mount
-# point "/mcp" on FastAPI, that produces the double-prefixed
-# "/mcp/mcp/". Override to "/" so the public URL is just "/mcp/".
 _mcp_server.settings.streamable_http_path = "/"
 
-# v0.2.2: disable DNS rebinding protection. Without this, FastMCP
-# rejects any Host header that isn't localhost/127.0.0.1 with `421
-# Misdirected Request`. Our threat model is perimeter-based
-# (SECURITY.md) and /mcp is for AI agents not browsers, so DNS
-# rebinding is not in scope.
 _mcp_server.settings.transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=False,
 )
 
-# v0.2.3: stateless + json_response. Default stateful mode keeps a
-# long-poll GET /mcp/ open for server-pushed events; strict-spec
-# MCP clients (Cowork's managed UI) hang on that pattern. Stateless
-# + json_response collapses every MCP call to a single POST with
-# the response in the body as application/json — the simplest, most
-# compatible mode. partsmith's tools are all request/response (no
-# streaming output) so this loses nothing.
 _mcp_server.settings.stateless_http = True
 _mcp_server.settings.json_response = True
 
-# Calling streamable_http_app() also lazily creates session_manager.
 _mcp_asgi_app = _mcp_server.streamable_http_app()
 
 
@@ -221,6 +196,14 @@ class RenderRequest(BaseModel):
     view: str = Field("iso", pattern=r"^[a-z_]{1,16}$")
     with_dimensions: bool = True
     with_hidden: bool = True  # accepted for API compat; not used in v0
+
+
+class SectionRequest(BaseModel):
+    """v0.2.6: 2D cross-section render request."""
+    name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
+    plane: str = Field("YZ", pattern=r"^(XY|XZ|YZ)$")
+    at: float = Field(0.0, ge=-10000.0, le=10000.0)
+    with_dimensions: bool = True
 
 
 class ExportRequest(BaseModel):
@@ -262,7 +245,6 @@ def create_model(req: CreateModelRequest):
                 preview_path.write_bytes(png)
                 result["preview_path"] = str(preview_path)
             except OSError as e:
-                # Most likely: bind-mount perm mismatch on /renders
                 result["render_error"] = (
                     f"preview write failed: {e}. "
                     f"Check that {RENDERS} is writable by uid 1000."
@@ -334,6 +316,39 @@ def render_multiview_endpoint(req: RenderRequest):
     }
 
 
+@app.post("/render/section")
+def render_section_endpoint(req: SectionRequest):
+    """v0.2.6: 2D cross-section through the loaded model.
+
+    Slices the geometry on the chosen plane at offset ``at`` mm.
+    Lets you see inside designs without exporting + opening in a slicer.
+    See renderer.render_section() docstring for plane conventions.
+    """
+    state = engine.get(req.name)
+    if not state or not state.shape:
+        raise HTTPException(404, f"No model '{req.name or 'active'}' found")
+    try:
+        png = render_section(
+            state.shape,
+            plane=req.plane,
+            at=req.at,
+            with_dimensions=req.with_dimensions,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    # Filename encodes plane + at so callers can compare slices
+    at_label = f"{req.at:.2f}".replace(".", "p").replace("-", "neg")
+    fname = f"{state.name}_section_{req.plane}_{at_label}.png"
+    path = RENDERS / fname
+    _safe_write(path, png, "section render")
+    return {
+        "path": str(path),
+        "plane": req.plane,
+        "at": req.at,
+        "base64": base64.b64encode(png).decode("ascii"),
+    }
+
+
 @app.post("/render/all")
 def render_all_endpoint(req: RenderRequest):
     state = engine.get(req.name)
@@ -365,9 +380,6 @@ def export_model(req: ExportRequest):
     except (ValueError, RuntimeError) as e:
         raise HTTPException(400, str(e))
     except OSError as e:
-        # build123d's exporter (or our final relative_to check) hit a
-        # filesystem permission/space issue. Bind-mount perm misalignment
-        # is the most common cause.
         raise HTTPException(
             500,
             f"Export write failed: {e}. "
@@ -394,16 +406,7 @@ def analyze_printability_endpoint(req: PrintabilityRequest):
 
 @app.get("/workspace/{filename}")
 def serve_workspace_file(filename: str):
-    """Stream a previously-exported file from the workspace.
-
-    Used by MCP clients when ``partsmith_export`` returns a ``url_path``
-    pointer instead of inlining the file (size > INLINE_MAX_BYTES, 8 MiB
-    default).
-
-    Strict allowlist on filename: must be ``<safe-name>.<allowed-ext>``,
-    nothing else. Defense in depth on top of FastAPI's no-slash path
-    param.
-    """
+    """Stream a previously-exported file from the workspace."""
     safe = Path(filename).name
     if safe != filename or not safe:
         raise HTTPException(400, "Invalid filename")
@@ -430,14 +433,7 @@ def serve_workspace_file(filename: str):
 
 @app.post("/design/save")
 def save_design(req: SaveDesignRequest):
-    """Save a design's source + metadata to disk. Also executes as a model.
-
-    Mirrors `partsmith_save_design` MCP tool — see that for semantics.
-    Source survives container restart; the in-memory model registration
-    is a side effect.
-    """
-    # Try to execute for geometry snapshot. Failure is non-fatal; source
-    # is the source of truth.
+    """Save a design's source + metadata to disk. Also executes as a model."""
     geometry = None
     execution_result = engine.execute_code(req.code, req.name)
     if execution_result.get("success") and execution_result.get("geometry"):
@@ -474,10 +470,7 @@ def list_designs():
 
 @app.get("/design/{name}")
 def get_design(name: str):
-    """Load a design's source code + metadata WITHOUT executing.
-
-    For "load and run as a model" use POST /design/{name}/load instead.
-    """
+    """Load a design's source code + metadata WITHOUT executing."""
     _validate_name(name)
     try:
         code, metadata = store.load(name)
@@ -490,10 +483,7 @@ def get_design(name: str):
 
 @app.delete("/design/{name}")
 def delete_design(name: str):
-    """Delete a saved design (.py + .json) from disk.
-
-    Does not affect any in-memory model with the same name.
-    """
+    """Delete a saved design (.py + .json) from disk."""
     _validate_name(name)
     try:
         deleted = store.delete(name)
@@ -508,10 +498,7 @@ def delete_design(name: str):
 
 @app.post("/design/{name}/load")
 def load_and_execute_design(name: str):
-    """Load a design from disk + execute it (register as a model).
-
-    Returns the same shape as POST /model/create.
-    """
+    """Load a design from disk + execute it (register as a model)."""
     _validate_name(name)
     try:
         code, metadata = store.load(name)
@@ -520,7 +507,6 @@ def load_and_execute_design(name: str):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    # Execute as a model (same shape as POST /model/create)
     result = engine.execute_code(code, name)
     if result["success"] and result["geometry"]:
         state = engine.get(name)
@@ -544,10 +530,5 @@ def load_and_execute_design(name: str):
 
 
 # ── v0.2: MCP Streamable-HTTP transport (mount) ───────────────────
-#
-# The MCP ASGI app + session manager were built above (must precede the
-# FastAPI app construction so the lifespan can manage them). Mount it
-# now under /mcp — combined with streamable_http_path="/" on the
-# FastMCP, public URL is `/mcp/`.
 
 app.mount("/mcp", _mcp_asgi_app)

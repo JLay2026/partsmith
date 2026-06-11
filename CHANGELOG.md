@@ -4,6 +4,60 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.2.6] — 2026-06-10
+
+### Added
+- **`src/renderer.py:render_section()`** — 2D cross-section through a
+  build123d Shape on the XY/XZ/YZ planes at a given `at` offset (mm).
+  Uses `trimesh.Trimesh.section()` for the mesh-plane intersection;
+  manual axis projection (not `Path3D.to_planar()`) so the 2D axes
+  stay aligned with user expectations (Y→horizontal, Z→vertical for
+  the default YZ plane, etc.).
+- **`POST /render/section`** REST endpoint. Request:
+  `{"name": "...", "plane": "YZ"|"XZ"|"XY", "at": 0.0, "with_dimensions": true}`.
+  Returns `{"path": ..., "plane": ..., "at": ..., "base64": ...}`.
+- **`partsmith_render_section`** MCP tool with detailed plane-convention
+  docstring (LLM-readable so the tool selects appropriate `at` values).
+- **`tests/test_section.py`** — signature/contract tests
+  (4 tests): render_section signature, plane-string validation,
+  SECTION_PLANES table consistency, SectionRequest pydantic schema.
+
+### Design notes
+- **Outline-only sections in v0.2.6.** Filled material rendering (via
+  shapely polygons from `Path2D.polygons_full`) deferred to a possible
+  v0.2.7 — wanted to ship the highest-leverage piece (visibility into
+  internal geometry) first; aesthetic fill comes once we see what real
+  designs need.
+- **No-intersection placeholder, not 500.** When `at` is outside the
+  geometry's bbox along the plane's normal, returns a PNG with the
+  valid range so the LLM can self-correct. Same for degenerate
+  tangent-to-face sections.
+- **Manual axis projection** instead of `trimesh.Path3D.to_planar()` to
+  avoid rotation-matrix surprises that would mismatch axis labels
+  ("X (mm)" but actually plotting Y, etc.).
+- **`SECTION_PLANES` table** as single source of truth for plane defs;
+  any future plane (e.g. arbitrary diagonal) plugs in here. Validated
+  for internal consistency by `test_section_planes_constant_complete`.
+
+### Why
+Per ROADMAP Theme 2 (output fidelity) — current iso renders confirm
+"not garbage" but you can't tell whether wall thickness, screw hole
+position, or fillet radius is right. Cross-sections close that gap
+inline in the chat (no STL export + Bambu Studio round-trip).
+
+Ranked highest of all open backlog items for in-line viz impact in the
+"what improves iterative design + viz" review on 2026-06-10 after the
+v0.2.5 ship.
+
+Resolves [#8](https://github.com/JLay2026/partsmith/issues/8).
+Third v0.3.0-era item to ship (after #2 design store in v0.2.4 and
+#1 helpers in v0.2.5).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.2.5] — 2026-06-10
 
 ### Added
@@ -18,36 +72,13 @@ this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
     `fillet_top_edges(part, radius)`
   - **Pattern helper:** `screw_pattern(positions, hole_func)`
 - **`tests/test_helpers.py`** — lightweight smoke tests for helper
-  surface (`HELPERS` dict, signatures, docstrings, error handling,
-  namespace injection wiring). Doesn't exercise full build123d
-  geometry — that's #5's job (integration suite).
-
-### Design notes
-- Hole helpers return a Part positioned with TOP face at Z=0,
-  extending in -Z. Consistent convention so users can compose them
-  without per-helper orientation gotchas.
-- All helpers are thin wrappers around build123d primitives — they
-  compose with raw build123d, they don't replace it. Per issue #1
-  scope criterion: a pattern earns a helper only if it appears in ≥2
-  designs OR is unambiguously universal (M-series hardware, common
-  edge treatments).
-- Helpers injected via lazy import in `CADEngine.execute_code` (not
-  at module top) to preserve server-boot speed. First `execute_code`
-  call pays the import cost; subsequent calls hit the import cache.
-- `HELPERS` dict in `partsmith_helpers.py` is the single source of
-  truth for what gets injected. Add new helpers there; `cad_engine.py`
-  picks them up automatically.
+  surface.
 
 ### Why
-Author ergonomics is the highest-leverage v0.3 theme (per ROADMAP
-Theme 1) — partsmith time is spent writing build123d, so anything
-that compresses repeated patterns has outsized payoff. Initial seed
-extracted from real designs (Woodpeckers wall mount, 2026-06-09);
-universal additions (`through_hole`, `hex_hole`, `fillet_top_edges`)
-included on first-principles M-series hardware grounds.
+Author ergonomics is the highest-leverage v0.3 theme. Reduces
+boilerplate for common 3D-printing patterns.
 
 Resolves [#1](https://github.com/JLay2026/partsmith/issues/1).
-Second v0.3.0 Theme 1 item to ship (after #2 design store in v0.2.4).
 
 ### Commit
 See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
@@ -59,39 +90,13 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ### Added
 - **Persistent design store** (`src/design_store.py`). Designs are
   saved to disk under `{workspace}/designs/` as `{name}.py` (source) +
-  `{name}.json` (metadata: timestamps, description, geometry snapshot).
-  Survive container restart; models are still in-memory only.
-- **4 new MCP tools:**
-  - `partsmith_save_design(name, code, description="")` — save + also
-    execute as a model so the result is immediately available
-  - `partsmith_load_design(name)` — load source from disk + execute
-  - `partsmith_list_designs()` — list all saved designs (cheap, no
-    re-execution; uses geometry snapshot captured at save time)
-  - `partsmith_delete_design(name)` — remove design files from disk
-- **5 new REST endpoints:**
-  - `POST /design/save`
-  - `GET /design/list`
-  - `GET /design/{name}` — source + metadata, no execution
-  - `DELETE /design/{name}`
-  - `POST /design/{name}/load` — load + execute as model
-
-### Design notes
-- Two-file persistence (source + sidecar) instead of single JSON so
-  source is human-readable on disk (`cat workspace/designs/bracket.py`)
-  and git-friendly if the workspace is versioned. Sidecar is bookkeeping
-  that can be regenerated from defaults if missing or corrupt.
-- `save` always tries to execute the code so geometry can be snapshotted
-  for `list` efficiency. If execution fails, save still succeeds — source
-  is the source of truth and the user can fix it later.
-- Same `NAME_PATTERN` validation as models. Path-traversal defense via
-  resolved-path-relative-to check.
-
-### Why
-Real designs go through 5-10 iterations. Pre-v0.2.4 every container
-restart wiped them. With this, your work isn't gated on container uptime.
+  `{name}.json` (metadata). Survive container restart; models are
+  still in-memory only.
+- **4 new MCP tools:** `partsmith_save_design`, `partsmith_load_design`,
+  `partsmith_list_designs`, `partsmith_delete_design`.
+- **5 new REST endpoints** under `/design/...`.
 
 Resolves [#2](https://github.com/JLay2026/partsmith/issues/2).
-First v0.3.0 Theme 1 (author ergonomics) item to ship.
 
 ### Commit
 See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
@@ -101,20 +106,9 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.3] — 2026-06-09
 
 ### Changed
-- **MCP transport switched to stateless + json_response mode.** FastMCP's
-  default stateful mode keeps a long-poll `GET /mcp/` stream open and
-  pushes tool responses to that stream rather than the originating POST
-  response. Strict-spec MCP clients (Cowork's managed UI specifically)
-  hang for 2-17 minutes on every tool call because they don't multiplex
-  POST-response + GET-stream events the way FastMCP expects.
-  Stateless + json_response collapses every MCP call to a single POST
-  with the response in the body as `application/json`. partsmith's
-  tools are all request/response (no streaming) so this loses nothing
-  and gains compatibility.
-
-### Verified
-- End-to-end through Cowork managed MCP UI 2026-06-09 (first real
-  workload — Woodpeckers wall mount STL — designed, exported, printed).
+- **MCP transport switched to stateless + json_response mode.** Fixes
+  the 2-17 min hang in Cowork's managed MCP UI caused by FastMCP's
+  default stateful long-poll mode.
 
 ### Commit
 [`0a2c238`](https://github.com/JLay2026/partsmith/commit/0a2c23813a94fa8e0caf8c0f8965305711429781)
@@ -124,15 +118,8 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.2] — 2026-06-09
 
 ### Fixed
-- **DNS rebinding protection disabled on the /mcp transport.** FastMCP's
-  `TransportSecuritySettings` defaults to
-  `enable_dns_rebinding_protection=True` with an empty `allowed_hosts`,
-  which rejects any `Host:` header that isn't `localhost`/`127.0.0.1`
-  with `421 Misdirected Request: Invalid Host header`. Discovered when
-  the v0.2.1 deploy returned 421 for every `https://cad.<host>/mcp/`
-  request. DNS rebinding is a browser attack; partsmith's MCP endpoint
-  is for AI agents and the threat model is perimeter-based
-  (`SECURITY.md`), so the protection is out of scope.
+- **DNS rebinding protection disabled on the /mcp transport.** Was
+  rejecting any non-localhost Host header with 421.
 
 ### Commit
 [`07883e7`](https://github.com/JLay2026/partsmith/commit/07883e7e3f94bde2f4e0eb316888782b9f1b9ad2)
@@ -142,30 +129,9 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.1] — 2026-06-09
 
 ### Fixed
-- **MCP lifespan integration.** FastMCP's `StreamableHTTPSessionManager`
-  must run inside an async context manager (`async with sm.run(): ...`).
-  FastAPI's `lifespan` kwarg does **not** propagate to sub-apps mounted
-  via `app.mount()`. v0.2.0 mounted the MCP ASGI app via `app.mount("/mcp", ...)`
-  without wiring the lifespan, so every MCP request crashed with
-  `RuntimeError: Task group is not initialized. Make sure to use run().`
-  Now: build the FastMCP server first, call `streamable_http_app()` to
-  lazily init the session manager, wire `session_manager.run()` into
-  the FastAPI lifespan, then construct the FastAPI app with that
-  lifespan.
-- **Clean `/mcp/` URL.** FastMCP's `streamable_http_path` defaults to
-  `/mcp`. Combined with our outer `app.mount("/mcp", ...)` on FastAPI,
-  the public URL became the awkward `/mcp/mcp/` (and `/mcp/` 404'd).
-  Now: explicitly set `_mcp_server.settings.streamable_http_path = "/"`
-  before calling `streamable_http_app()` so the combined URL is just
-  `/mcp/`.
-- **uvicorn `--proxy-headers --forwarded-allow-ips "*"`.** Without
-  these flags, uvicorn ignores `X-Forwarded-Proto` from a reverse proxy
-  whose source IP isn't `127.0.0.1`. For a containerized partsmith
-  behind Caddy on a separate container, Caddy's source IP is whatever
-  the docker network assigned it (e.g. `172.x.x.x`) — NOT 127.0.0.1.
-  Result before this fix: redirects came back with `Location:
-  http://...` instead of `https://...`, breaking clients that don't
-  follow scheme-downgrade redirects.
+- **MCP lifespan integration** — FastMCP session manager wired into
+  FastAPI lifespan; clean `/mcp/` URL via streamable_http_path="/";
+  uvicorn `--proxy-headers` for behind-Caddy scheme handling.
 
 ### Commit
 [`0f6a57f`](https://github.com/JLay2026/partsmith/commit/0f6a57f6e08ee99a3a94201d9c237bd6072c571d)
@@ -175,28 +141,12 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
 ## [0.2.0] — 2026-06-09
 
 ### Added
-- **FastMCP Streamable-HTTP transport mounted at `/mcp`.** Ten tools
-  prefixed `partsmith_*` (health, create_model, modify_model,
-  list_models, measure_model, render_3d, render_2d, render_multiview,
-  export, analyze_printability). Shares the same in-process `CADEngine`
-  as the REST endpoints so state is consistent across protocols.
-- **`GET /workspace/{filename}` endpoint** for the MCP large-file
-  URL-pointer fallback. Files > 8 MiB skip the inline base64 path and
-  return a `url_path` the client fetches via this endpoint. Strict
-  allowlist on filename (`[a-zA-Z0-9_-]+\.(stl|step|3mf)`) as defense
-  in depth against path traversal.
+- **FastMCP Streamable-HTTP transport at `/mcp`.** Ten tools prefixed
+  `partsmith_*`. Shares the same in-process `CADEngine` as REST.
+- **`GET /workspace/{filename}`** for MCP large-file URL pointer fallback.
 
 ### Removed
-- **`cad-agent-shim` dependency.** URL-based MCP clients (Cowork's
-  managed MCP UI, Claude Code, etc.) can now drive partsmith directly
-  via the `/mcp` endpoint. The shim is deprecated; see
-  [JLay2026/cad-agent-shim](https://github.com/JLay2026/cad-agent-shim)
-  (archived 2026-06-09).
-
-### Note
-This release introduced bugs fixed in v0.2.1/v0.2.2/v0.2.3 (lifespan,
-URL prefix, scheme downgrade, DNS rebinding, stateful-mode hang). The
-first genuinely working `/mcp` end-to-end release is v0.2.3.
+- **`cad-agent-shim`** — deprecated, archived 2026-06-09.
 
 ### Commit
 [`6fad5db`](https://github.com/JLay2026/partsmith/commit/6fad5dbb181642175962d24295eec80c8eb7d12d)
@@ -206,16 +156,8 @@ first genuinely working `/mcp` end-to-end release is v0.2.3.
 ## [0.1.3] — 2026-06-08
 
 ### Fixed
-- **All disk-write paths catch `OSError` and surface meaningful 500s.**
-  Previously a bind-mount permission mismatch (workspace/ or renders/
-  on the host owned by `root:root` instead of `1000:1000`) produced a
-  bare "Internal Server Error" with no clue what was wrong. Now the
-  500 names the path and the expected uid so the fix is obvious from
-  the error alone.
-
-### Added
-- README "First-time deploy" section calling out the chown step
-  explicitly so first-time deployers don't trip on it.
+- **All disk-write paths catch `OSError` and surface meaningful 500s**
+  with the affected path + the expected uid for the chown fix.
 
 ### Commit
 [`83a4a65`](https://github.com/JLay2026/partsmith/commit/83a4a65d11712d60de34b391031cb6c45cc2e6a3)
@@ -226,52 +168,24 @@ first genuinely working `/mcp` end-to-end release is v0.2.3.
 
 ### Fixed
 - **Docker container port-publishing routing.** Removed `internal: true`
-  from the compose network; with it set, the container's healthcheck
-  passed but `curl http://127.0.0.1:8123/health` from the host got
-  connection-refused depending on Docker version.
+  from the compose network.
 
 ---
 
 ## [0.1.1] — 2026-06-08
 
 ### Added
-- Per-face Lambertian shading in the 3D renderer (`renderer.py`).
-  Cubes look like cubes; geometry has depth cues; not photorealistic
-  but much better than the flat shading of v0.1.0.
+- Per-face Lambertian shading in the 3D renderer.
 
 ---
 
 ## [0.1.0] — 2026-06-08
 
 ### Added
-- Initial release. FastAPI server with the following REST endpoints:
-  - `GET /health`
-  - `POST /model/create` — execute build123d code, register as named model
-  - `POST /model/modify`
-  - `GET /model/list`
-  - `GET /model/{name}/measure`
-  - `POST /render/3d`, `/render/2d`, `/render/multiview`, `/render/all`
-  - `POST /export` (STL / STEP / 3MF)
-  - `POST /analyze/printability`
-- Pydantic Field-pattern validation on model names (path traversal
-  defense).
-- Custom middleware rejecting request bodies above 1 MiB
-  (`MAX_REQUEST_BYTES`).
-- Container hardening: non-root uid 1000, `cap_drop: ALL`,
-  `no-new-privileges`, `mem_limit: 4g`, `cpus: 2.0`, port published to
-  `127.0.0.1:8123` (loopback).
-- MIT license, SPDX headers on every source file, `SECURITY.md` with
-  explicit threat model ("no sandbox theatre — perimeter is the
-  boundary").
-- ~500 LOC across `src/server.py`, `src/cad_engine.py`,
-  `src/renderer.py`, `src/printability.py`.
+- Initial release. FastAPI server, build123d wrapper, matplotlib
+  renderer, printability check, MIT license, perimeter security model.
 
 ### Why partsmith exists
-
 Replaces the abandoned `Svetlana-DAO-LLC/cad-agent` which shipped a
 literal `SyntaxError` in its main file four months prior and nobody
-noticed. Rather than maintain a long-term patched fork, the wrapped
-surface was small enough (~500 LOC) to clean-room rewrite. See
-
-[`NOTICE.md`](NOTICE.md) for credit to prior work that informed
-endpoint shapes.
+noticed. ~500 LOC clean-room rewrite.
