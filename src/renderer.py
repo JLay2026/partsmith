@@ -7,6 +7,11 @@ Headless renderer.
 OSMesa — works in any vanilla container. 3D renders use per-face
 Lambertian shading (computed from mesh.face_normals) so geometry has
 real depth cues; not photorealistic, but readable.
+
+v0.2.6 (issue #8): adds render_section() — 2D cross-section through a
+shape on the XY/XZ/YZ planes at a given offset. Highest-leverage move
+for the iterate-by-AI-chat workflow: see inside designs without leaving
+the chat.
 """
 
 from __future__ import annotations
@@ -47,6 +52,21 @@ VIEW_PROJECTIONS_2D = {
     "left":   ((1, 2), (-1, +1), "Y (mm)", "Z (mm)"),
     "top":    ((0, 1), (+1, +1), "X (mm)", "Y (mm)"),
     "bottom": ((0, 1), (+1, -1), "X (mm)", "Y (mm)"),
+}
+
+# v0.2.6: cross-section plane definitions. For each plane:
+#   normal: unit vector perpendicular to the slice
+#   axis_idx: index into a 3D point (X=0, Y=1, Z=2) corresponding to the
+#             normal axis -- used to position the slice at `at` mm along it
+#   plot_axes: (x_idx, y_idx) of the remaining axes to project for the
+#              2D plot. Order matters: x_idx is plotted on horizontal,
+#              y_idx on vertical.
+#   xlabel, ylabel: axis labels for the 2D plot
+#   normal_name: human label for the axis perpendicular to the slice
+SECTION_PLANES = {
+    "XY": ([0.0, 0.0, 1.0], 2, (0, 1), "X (mm)", "Y (mm)", "Z"),
+    "XZ": ([0.0, 1.0, 0.0], 1, (0, 2), "X (mm)", "Z (mm)", "Y"),
+    "YZ": ([1.0, 0.0, 0.0], 0, (1, 2), "Y (mm)", "Z (mm)", "X"),
 }
 
 # Default 3D look: muted blue-grey body, dark edges, subtle ambient
@@ -234,4 +254,145 @@ def render_multiview(shape: Any, size: tuple[int, int] = (1200, 900)) -> bytes:
     ax4.set_title("Iso (shaded)")
 
     fig.tight_layout()
+    return _fig_to_png(fig)
+
+
+def render_section(
+    shape: Any,
+    plane: str = "YZ",
+    at: float = 0.0,
+    size: tuple[int, int] = (800, 600),
+    with_dimensions: bool = True,
+) -> bytes:
+    """Render a 2D cross-section through a build123d Shape.
+
+    Slices the mesh on the chosen plane at offset ``at`` and renders the
+    resulting outline as a 2D PNG. Use to see inside designs without
+    exporting STL + opening in a slicer — verify wall thickness,
+    internal cavities, snap-fit clearances, screw-hole bottoms, ribs.
+
+    Args:
+        shape: build123d Shape / Part / Solid / Compound to section.
+        plane: One of "XY" (horizontal slice, normal Z), "XZ" (vertical
+            slice, normal Y), or "YZ" (vertical slice, normal X).
+            Default "YZ" = right-side cross-section.
+        at: Offset along the normal axis (mm). Default 0.0 = through
+            origin. Use the geometry's bbox to pick interior values.
+        size: Output PNG (width, height) in pixels.
+        with_dimensions: Overlay W/H callout in the upper-left.
+
+    Returns:
+        PNG bytes.
+
+    Raises:
+        ValueError: If ``plane`` is not one of "XY"/"XZ"/"YZ".
+
+    Notes:
+        - If the plane doesn't intersect the geometry, returns a
+          placeholder PNG with the bbox extent so the caller can pick
+          a valid ``at``. Does not raise.
+        - Section outline only (no filled material) in v0.2.6 — fill is
+          a planned v0.2.7 enhancement once we see what real workflows
+          need.
+    """
+    if plane not in SECTION_PLANES:
+        raise ValueError(
+            f"plane must be 'XY', 'XZ', or 'YZ', got {plane!r}"
+        )
+
+    normal, axis_idx, plot_axes, xlabel, ylabel, normal_name = SECTION_PLANES[plane]
+    mesh = _shape_to_trimesh(shape)
+
+    plane_origin = [0.0, 0.0, 0.0]
+    plane_origin[axis_idx] = float(at)
+
+    fig, ax = plt.subplots(figsize=(size[0] / 100, size[1] / 100), dpi=100)
+
+    # Compute the cross-section using trimesh's mesh-plane intersection.
+    # Returns a Path3D (or None if the plane doesn't cut the mesh).
+    section_path3d = mesh.section(
+        plane_origin=plane_origin,
+        plane_normal=normal,
+    )
+
+    if section_path3d is None:
+        # No intersection — give a helpful placeholder rather than 500.
+        # The caller (LLM) can re-run with a valid `at` from the bbox.
+        bbox = mesh.bounds
+        axis_min = bbox[0, axis_idx]
+        axis_max = bbox[1, axis_idx]
+        ax.text(
+            0.5, 0.5,
+            (
+                f"No intersection at {normal_name}={at:.2f} mm.\n"
+                f"Geometry spans {normal_name}={axis_min:.2f} to "
+                f"{axis_max:.2f} mm.\nPick `at` within that range."
+            ),
+            transform=ax.transAxes,
+            ha="center", va="center",
+            fontsize=11,
+            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.9),
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(
+            f"{plane} cross-section at {normal_name}={at:.2f} mm "
+            f"(no intersection)"
+        )
+        return _fig_to_png(fig)
+
+    # Project section vertices to 2D using the plot_axes indices.
+    # This avoids trimesh.Path3D.to_planar()'s rotation matrix surprises;
+    # axes stay aligned with the user's expectation.
+    verts3d = section_path3d.vertices
+    plotted_any = False
+    for entity in section_path3d.entities:
+        # entity.points is an index array into vertices
+        idx = entity.points
+        if len(idx) < 2:
+            continue
+        x_data = verts3d[idx, plot_axes[0]]
+        y_data = verts3d[idx, plot_axes[1]]
+        ax.plot(
+            x_data, y_data,
+            color=DEFAULT_EDGE_COLOR,
+            linewidth=0.8,
+        )
+        plotted_any = True
+
+    if not plotted_any:
+        # Should be rare (plane tangent to a single face); handle anyway
+        ax.text(
+            0.5, 0.5,
+            f"Section at {normal_name}={at:.2f} produced no edges.\n"
+            f"Try a slightly different `at`.",
+            transform=ax.transAxes,
+            ha="center", va="center",
+            fontsize=11,
+            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.9),
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        ax.set_aspect("equal", adjustable="datalim")
+        ax.autoscale_view()
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"{plane} cross-section at {normal_name}={at:.2f} mm")
+    ax.grid(True, alpha=0.3, linestyle="--")
+
+    if with_dimensions and plotted_any:
+        xmin, xmax = ax.get_xlim()
+        ymin, ymax = ax.get_ylim()
+        width = xmax - xmin
+        height = ymax - ymin
+        ax.text(
+            0.02, 0.98,
+            f"W: {width:.2f} mm\nH: {height:.2f} mm",
+            transform=ax.transAxes,
+            va="top", ha="left",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+
     return _fig_to_png(fig)
