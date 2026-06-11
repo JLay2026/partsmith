@@ -3,34 +3,17 @@
 """
 MCP Streamable-HTTP transport for partsmith.
 
-Wraps the same CADEngine + renderer + printability + design store
-functions used by the REST layer as MCP tools, so URL-based MCP clients
-(e.g. Cowork's managed MCP UI) can drive partsmith directly with no
-intermediate shim process.
-
-File-returning tools (render_*, export) return small payloads inline as
-base64; payloads above ``INLINE_MAX_BYTES`` (default 8 MiB) are written
-to the workspace and returned as a ``url_path`` the client GETs back
-through the same auth perimeter.
-
-All MCP tool names are prefixed ``partsmith_`` to avoid collisions in
-multi-server MCP setups (Cowork can have several servers registered).
-
-The MCP app is mounted at ``/mcp`` on the FastAPI app and inherits the
-same auth perimeter — no separate auth in this module.
-
-v0.2.4: adds 4 design-store tools (save/load/list/delete) backed by
-the on-disk DesignStore.
-
-v0.2.6 (issue #8): adds partsmith_render_section — 2D cross-section
-through a loaded model. Highest-leverage move for in-line viz: see
-internal cavities, wall thickness, etc. without exporting STL.
+v0.2.4: design store tools (save/load/list/delete).
+v0.2.6 (issue #8): partsmith_render_section.
+v0.2.7 (issue #3): partsmith_list_versions, partsmith_diff_designs.
+                   save/load/delete tools accept optional version.
 """
 from __future__ import annotations
 
 import base64
 import os
 from pathlib import Path
+from typing import Optional, Union
 
 from mcp.server.fastmcp import FastMCP
 
@@ -46,7 +29,6 @@ INLINE_MAX_BYTES = int(
 
 
 def _file_response(data: bytes, filename: str, content_type: str) -> dict:
-    """Return either a base64-inlined file or a URL pointer, based on size."""
     size = len(data)
     if size <= INLINE_MAX_BYTES:
         return {
@@ -110,36 +92,19 @@ def build_mcp(
     def partsmith_create_model(code: str, name: str = "default") -> dict:
         """Execute build123d Python code and register the resulting shape.
 
-        The code must produce a final shape, assigned to a variable
-        named ``result`` (preferred) or any Part / Solid / Compound. The
-        execution namespace has ``from build123d import *`` and
-        ``import numpy as np`` pre-loaded, plus the partsmith_helpers
-        seven functions (through_hole, screw_hole, hex_hole, slot,
-        chamfer_edges, fillet_top_edges, screw_pattern).
+        Execution namespace includes ``from build123d import *``,
+        ``import numpy as np``, plus seven partsmith_helpers
+        (through_hole, screw_hole, hex_hole, slot, chamfer_edges,
+        fillet_top_edges, screw_pattern).
 
-        Names are validated [a-zA-Z0-9_-]{1,64}. The model registry is
-        in-memory and bounded at 32 entries (LRU). On success a small
-        iso-view preview PNG is returned inline as ``preview_data_b64``.
-
-        Args:
-            code: build123d Python source to execute.
-            name: Model identifier (default "default").
-
-        Returns dict with: success (bool), stdout, error, geometry,
-        and optionally preview_data_b64.
-
-        Note: models are in-memory only. Use partsmith_save_design to
-        persist source code that survives container restart.
+        Models are in-memory only. Use partsmith_save_design to persist
+        source code that survives container restart (versioned).
         """
         return _do_create(code, name)
 
     @mcp.tool()
     def partsmith_modify_model(code: str, name: str = "default") -> dict:
-        """Re-execute build123d code under an existing model name.
-
-        Functionally identical to ``partsmith_create_model`` -- provided
-        as a separate tool to express intent at the call site.
-        """
+        """Re-execute build123d code under an existing model name."""
         return _do_create(code, name)
 
     @mcp.tool()
@@ -160,8 +125,6 @@ def build_mcp(
             name: Model identifier (default "default").
             view: One of front, back, left, right, top, bottom, iso,
                   iso_back. Defaults to iso.
-
-        Returns a PNG as base64 (inline) when small.
         """
         state, err = _need_shape(name)
         if err:
@@ -175,15 +138,7 @@ def build_mcp(
         view: str = "front",
         with_dimensions: bool = True,
     ) -> dict:
-        """Render a 2D orthographic projection of a loaded model.
-
-        Args:
-            name: Model identifier (default "default").
-            view: One of front, back, left, right, top, bottom.
-            with_dimensions: Overlay W/H annotation. Default True.
-
-        Returns a PNG as base64.
-        """
+        """Render a 2D orthographic projection of a loaded model."""
         state, err = _need_shape(name)
         if err:
             return err
@@ -209,53 +164,27 @@ def build_mcp(
         """Render a 2D cross-section through a loaded model.
 
         Use this to see INSIDE a design -- internal cavities, wall
-        thickness, snap-fit clearances, screw-hole bottoms, ribs --
-        without exporting STL and opening in a slicer. Single biggest
-        in-line viz lever for iterate-by-AI-chat workflows.
+        thickness, snap-fit clearances. Plane conventions:
+            "XY" - horizontal slice (normal Z), at = Z-coord.
+            "XZ" - front-view vertical slice (normal Y), at = Y-coord.
+            "YZ" - right-view vertical slice (normal X), at = X-coord.
+                   DEFAULT, through origin.
 
-        Plane conventions:
-            "XY" - horizontal slice (normal = Z), look down from above.
-                   at = Z-coordinate of the slice.
-            "XZ" - front-view vertical slice (normal = Y).
-                   at = Y-coordinate.
-            "YZ" - right-view vertical slice (normal = X). DEFAULT.
-                   at = X-coordinate. Through-origin slice on most
-                   models centered at X=0.
-
-        Args:
-            name: Model identifier (default "default").
-            plane: One of "XY", "XZ", "YZ". Default "YZ".
-            at: Offset along the plane's normal axis in mm. Default 0.0.
-                Use partsmith_measure_model to find bbox extents and
-                pick a value INSIDE the geometry.
-            with_dimensions: Overlay section W/H callout (mm). Default True.
-
-        Returns a PNG as base64. If the plane doesn't intersect the
-        geometry, returns a placeholder PNG with the valid range so
-        the caller can self-correct (does NOT raise).
-
-        Tip: pair with partsmith_measure_model to pick `at` values.
-        Cross-section at midpoint of a bounding axis usually reveals
-        the most structural detail.
+        Pair with partsmith_measure_model to pick `at` values from bbox.
         """
         state, err = _need_shape(name)
         if err:
             return err
         try:
             png = render_section(
-                state.shape,
-                plane=plane,
-                at=at,
+                state.shape, plane=plane, at=at,
                 with_dimensions=with_dimensions,
             )
         except ValueError as e:
             return {"error": str(e)}
-        # Encode at into filename: 0.50 -> 0p50, -3.25 -> neg3p25
         at_label = f"{at:.2f}".replace(".", "p").replace("-", "neg")
         return _file_response(
-            png,
-            f"{name}_section_{plane}_{at_label}.png",
-            "image/png",
+            png, f"{name}_section_{plane}_{at_label}.png", "image/png",
         )
 
     @mcp.tool()
@@ -300,13 +229,40 @@ def build_mcp(
             state.shape, min_wall_thickness_mm=min_wall_thickness_mm
         )
 
+    # -- v0.2.4 + v0.2.7: design store tools ----------------
+
     @mcp.tool()
     def partsmith_save_design(
         name: str,
         code: str,
         description: str = "",
+        version: Union[int, str] = "auto",
     ) -> dict:
-        """Save a design's source code to disk so it survives container restart."""
+        """Save a design version to disk.
+
+        v0.2.7: designs are now versioned. The file layout is
+        ``{workspace}/designs/{name}/v1.py``, ``v2.py``, ``v3.py``, etc.
+        plus matching ``.json`` sidecars.
+
+        Args:
+            name: Design identifier (NAME_PATTERN-validated).
+            code: build123d Python source. Stored verbatim.
+            description: Optional free-form description (max 500 chars).
+            version: "auto" (default) appends the next unused version;
+                an int targets that specific version, overwriting any
+                existing content at that slot. Use "auto" for normal
+                iteration; use an explicit int only to fix a previously
+                bad version in place.
+
+        Side effect: also executes the code as a model under ``name`` so
+        the result is immediately available for render / measure /
+        export. If execution fails the save still succeeds (source is
+        the source of truth; user can fix and re-save).
+
+        Returns:
+            saved (bool), execution (dict with success/error/geometry),
+            metadata (dict including version, created_at, last_modified).
+        """
         geometry = None
         execution_result = engine.execute_code(code, name)
         if execution_result.get("success") and execution_result.get("geometry"):
@@ -314,10 +270,11 @@ def build_mcp(
 
         try:
             metadata = store.save(
-                name, code, description=description, geometry=geometry
+                name, code, description=description, geometry=geometry,
+                version=version,
             )
         except ValueError as e:
-            return {"error": f"Invalid name: {e}"}
+            return {"error": f"Invalid name or version: {e}"}
         except OSError as e:
             return {
                 "error": (
@@ -337,14 +294,30 @@ def build_mcp(
         }
 
     @mcp.tool()
-    def partsmith_load_design(name: str) -> dict:
-        """Load a saved design from disk and execute it as a model."""
+    def partsmith_load_design(
+        name: str,
+        version: Optional[int] = None,
+    ) -> dict:
+        """Load a saved design from disk and execute it as a model.
+
+        v0.2.7: optional version (default = latest). Pre-v0.2.7 designs
+        in the legacy flat layout are exposed as version 1
+        transparently.
+
+        Args:
+            name: Design identifier (must exist in the design store).
+            version: Specific version int, or None (default) for latest.
+
+        Returns same shape as partsmith_create_model plus:
+            loaded_from: "design_store"
+            design_metadata: persisted metadata (includes version)
+        """
         try:
-            code, metadata = store.load(name)
+            code, metadata = store.load(name, version=version)
         except FileNotFoundError:
             return {"error": f"Design not found: {name}"}
         except ValueError as e:
-            return {"error": f"Invalid name: {e}"}
+            return {"error": f"Invalid name or version: {e}"}
 
         result = _do_create(code, name)
         result["loaded_from"] = "design_store"
@@ -353,18 +326,94 @@ def build_mcp(
 
     @mcp.tool()
     def partsmith_list_designs() -> dict:
-        """List all saved designs with their metadata."""
+        """List all saved designs (latest version of each).
+
+        Returns one entry per design name. Use partsmith_list_versions
+        to see all versions of a specific design.
+        """
         return {"designs": [m.to_dict() for m in store.list_all()]}
 
     @mcp.tool()
-    def partsmith_delete_design(name: str) -> dict:
-        """Delete a saved design from disk (both .py source + .json metadata)."""
+    def partsmith_list_versions(name: str) -> dict:
+        """v0.2.7: list version numbers for a saved design.
+
+        Args:
+            name: Design identifier.
+
+        Returns:
+            name, versions (list[int], sorted ascending).
+            Empty list if the design has no saved versions.
+        """
         try:
-            deleted = store.delete(name)
+            versions = store.list_versions(name)
         except ValueError as e:
             return {"error": f"Invalid name: {e}"}
+        return {"name": name, "versions": versions}
+
+    @mcp.tool()
+    def partsmith_diff_designs(
+        name: str,
+        v1: int,
+        v2: int,
+    ) -> dict:
+        """v0.2.7: diff two versions of a saved design.
+
+        Compares v1 (older) to v2 (newer) and returns:
+            source_diff: unified diff text (3 lines of context)
+            volume_delta_mm3: v2 volume - v1 volume (or null)
+            surface_area_delta_mm2: v2 - v1 (or null)
+            bbox_size_delta_mm: [dx, dy, dz] (v2 - v1) or null
+            v1_metadata, v2_metadata: full metadata dicts
+
+        Negative deltas mean v2 is smaller/lighter than v1.
+
+        Use partsmith_list_versions(name) first to see available
+        version numbers. Both v1 and v2 must already exist.
+
+        Args:
+            name: Design identifier.
+            v1: From-version (older), positive int.
+            v2: To-version (newer), positive int.
+        """
+        try:
+            return store.diff(name, v1=v1, v2=v2)
+        except FileNotFoundError as e:
+            return {"error": str(e)}
+        except ValueError as e:
+            return {"error": str(e)}
+
+    @mcp.tool()
+    def partsmith_delete_design(
+        name: str,
+        version: Optional[int] = None,
+    ) -> dict:
+        """Delete a saved design version(s) from disk.
+
+        v0.2.7: optional version param.
+            version=None (default): delete ALL versions (and the
+                design directory).
+            version=int: delete just that version (leaves others
+                intact).
+
+        Does NOT remove any in-memory model with the same name; that
+        survives until the next partsmith_create_model call overwrites
+        it, container restart, or LRU eviction.
+
+        Args:
+            name: Design identifier.
+            version: Specific version to delete, or None for all.
+
+        Returns:
+            deleted (bool): True if anything was removed.
+            name (str): echoed back.
+            version: echoed back (None means all).
+        """
+        try:
+            deleted = store.delete(name, version=version)
+        except ValueError as e:
+            return {"error": f"Invalid name or version: {e}"}
         except OSError as e:
             return {"error": f"Delete failed: {e}"}
-        return {"deleted": deleted, "name": name}
+        return {"deleted": deleted, "name": name, "version": version}
 
     return mcp
