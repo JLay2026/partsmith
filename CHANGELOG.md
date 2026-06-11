@@ -4,6 +4,56 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.2.5] — 2026-06-10
+
+### Added
+- **`src/partsmith_helpers.py`** — reusable build123d patterns,
+  auto-injected into the build123d execution namespace by
+  `CADEngine.execute_code`. Seven helpers shipped:
+  - **Hole helpers:** `through_hole(diameter, depth)`,
+    `screw_hole(diameter, depth, countersink=True, head_diameter=None,
+    countersink_angle=90)`, `hex_hole(across_flats, depth)`
+  - **Slot helper:** `slot(length, width, depth)` — stadium-shaped
+  - **Edge treatment:** `chamfer_edges(part, radius, edges='all')`,
+    `fillet_top_edges(part, radius)`
+  - **Pattern helper:** `screw_pattern(positions, hole_func)`
+- **`tests/test_helpers.py`** — lightweight smoke tests for helper
+  surface (`HELPERS` dict, signatures, docstrings, error handling,
+  namespace injection wiring). Doesn't exercise full build123d
+  geometry — that's #5's job (integration suite).
+
+### Design notes
+- Hole helpers return a Part positioned with TOP face at Z=0,
+  extending in -Z. Consistent convention so users can compose them
+  without per-helper orientation gotchas.
+- All helpers are thin wrappers around build123d primitives — they
+  compose with raw build123d, they don't replace it. Per issue #1
+  scope criterion: a pattern earns a helper only if it appears in ≥2
+  designs OR is unambiguously universal (M-series hardware, common
+  edge treatments).
+- Helpers injected via lazy import in `CADEngine.execute_code` (not
+  at module top) to preserve server-boot speed. First `execute_code`
+  call pays the import cost; subsequent calls hit the import cache.
+- `HELPERS` dict in `partsmith_helpers.py` is the single source of
+  truth for what gets injected. Add new helpers there; `cad_engine.py`
+  picks them up automatically.
+
+### Why
+Author ergonomics is the highest-leverage v0.3 theme (per ROADMAP
+Theme 1) — partsmith time is spent writing build123d, so anything
+that compresses repeated patterns has outsized payoff. Initial seed
+extracted from real designs (Woodpeckers wall mount, 2026-06-09);
+universal additions (`through_hole`, `hex_hole`, `fillet_top_edges`)
+included on first-principles M-series hardware grounds.
+
+Resolves [#1](https://github.com/JLay2026/partsmith/issues/1).
+Second v0.3.0 Theme 1 item to ship (after #2 design store in v0.2.4).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.2.4] — 2026-06-09
 
 ### Added
@@ -222,5 +272,6 @@ Replaces the abandoned `Svetlana-DAO-LLC/cad-agent` which shipped a
 literal `SyntaxError` in its main file four months prior and nobody
 noticed. Rather than maintain a long-term patched fork, the wrapped
 surface was small enough (~500 LOC) to clean-room rewrite. See
+
 [`NOTICE.md`](NOTICE.md) for credit to prior work that informed
 endpoint shapes.
