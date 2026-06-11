@@ -1,0 +1,78 @@
+---
+# Integration tests against a real partsmith container.
+#
+# Builds the image from the current branch, starts it, waits for
+# /health, then runs tests/integration/ with PARTSMITH_URL pointing
+# at the loopback port.
+#
+# Existence of this workflow is the v0.3.1 deliverable per ROADMAP
+# Theme 4. Catches the kind of regressions that bit v0.2.0 -> v0.2.3
+# (MCP lifespan, double-prefix path, scheme downgrade, DNS rebinding)
+# in CI rather than in production.
+
+name: Integration
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  integration:
+    name: Container roundtrip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build partsmith image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: partsmith:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start partsmith container
+        run: |
+          docker run -d --name partsmith \
+            -p 127.0.0.1:8123:8123 \
+            partsmith:test
+          echo "Waiting for /health (up to 90s)..."
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8123/health >/dev/null 2>&1; then
+              echo "partsmith ready after ${i} attempt(s)"
+              curl -s http://127.0.0.1:8123/health
+              echo
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "partsmith failed to become healthy in 90s"
+          docker logs partsmith
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install integration test deps
+        run: pip install pytest requests
+
+      - name: Run integration tests
+        env:
+          PARTSMITH_URL: http://127.0.0.1:8123
+        run: pytest tests/integration/ -v --tb=short
+
+      - name: Container logs (on failure)
+        if: failure()
+        run: docker logs partsmith
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f partsmith || true
