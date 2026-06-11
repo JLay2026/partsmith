@@ -41,15 +41,18 @@ v0.2.3:
 v0.2.4:
 - Persistent design store (`src/design_store.py`). Designs survive
   container restart; models don't. 5 new REST endpoints under
-  `/design/...` and 4 new MCP tools (`partsmith_save_design`,
-  `partsmith_load_design`, `partsmith_list_designs`,
-  `partsmith_delete_design`). See ROADMAP.md Theme 1 / issue #2.
+  `/design/...` and 4 new MCP tools.
 
 v0.2.6 (issue #8):
-- Cross-section renderer. New `render_section()` in renderer.py and
-  the matching POST /render/section endpoint here. Lets you see
-  inside designs (internal cavities, wall thickness, screw-hole
-  bottoms) without exporting STL + opening in Bambu Studio.
+- Cross-section renderer. `render_section()` + POST /render/section
+  + partsmith_render_section MCP tool.
+
+v0.2.7 (issue #3):
+- Versioned designs + diff. Each design is now a versioned trail
+  (v1.py + v1.json, v2.py + v2.json, ...). 2 new REST endpoints:
+  GET /design/{name}/versions and GET /design/{name}/diff. Existing
+  save/load/delete endpoints accept an optional version parameter.
+  Backward-compatible with v0.2.4-v0.2.6 flat layout.
 """
 
 from __future__ import annotations
@@ -59,9 +62,9 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
@@ -79,36 +82,21 @@ RENDERS = Path(os.environ.get("PARTSMITH_RENDERS", "/renders"))
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 RENDERS.mkdir(parents=True, exist_ok=True)
 
-# v0.1: reject request bodies above this size before they ever touch
-# the engine. 1 MiB is plenty for build123d code; legitimate models
-# rarely exceed a few KB. Tune via PARTSMITH_MAX_BODY_BYTES.
 MAX_REQUEST_BYTES = int(os.environ.get("PARTSMITH_MAX_BODY_BYTES", str(1 * 1024 * 1024)))
 
-# v0.1: model name pattern — alphanumeric, dash, underscore only, 1-64 chars.
-# Prevents path traversal in engine.export() and keeps filenames sane.
 NAME_PATTERN = r"^[a-zA-Z0-9_-]{1,64}$"
 _NAME_RE = re.compile(NAME_PATTERN)
 
-# v0.2: file extensions the workspace-GET endpoint will serve. Matches
-# what engine.export() can produce; rejects anything else as a hardening
-# measure against e.g. stray .py / .env / .log read attempts.
 _ALLOWED_EXPORT_EXTS = frozenset(("stl", "step", "3mf"))
 
 
 def _validate_name(name: str) -> str:
-    """Belt-and-braces name validation for path params not covered by Pydantic."""
     if not _NAME_RE.match(name):
         raise HTTPException(400, f"Invalid name: must match {NAME_PATTERN}")
     return name
 
 
 def _safe_write(path: Path, data: bytes, context: str) -> None:
-    """Write bytes; surface OSError as a meaningful 500 instead of bare 'Internal Server Error'.
-
-    The most common cause in practice is bind-mount perm misalignment:
-    the host-side workspace/ or renders/ dir is owned by root but the
-    container runs as uid 1000. See README "First-time deploy".
-    """
     try:
         path.write_bytes(data)
     except OSError as e:
@@ -123,17 +111,9 @@ def _safe_write(path: Path, data: bytes, context: str) -> None:
 # ── Middleware ───────────────────────────────────────────
 
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
-    """Reject requests whose Content-Length exceeds MAX_REQUEST_BYTES.
-
-    v0.2: the MCP transport at /mcp is exempted because MCP responses
-    can exceed 1 MiB (base64-inlined renders / exports). The MCP layer
-    has its own request-side constraints (build123d code lives in tool
-    args and is bounded by client/MCP-framework limits).
-    """
+    """Reject requests whose Content-Length exceeds MAX_REQUEST_BYTES."""
 
     async def dispatch(self, request: Request, call_next):
-        # v0.2: skip the size cap for MCP requests; the layer manages its
-        # own payload semantics.
         if request.url.path.startswith("/mcp"):
             return await call_next(request)
         content_length = request.headers.get("content-length")
@@ -155,18 +135,16 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# ── App initialization (order matters for MCP lifespan) ──────────────
+# ── App initialization ──────────────────────────────────
 
 engine = CADEngine(workspace=WORKSPACE)
-store = DesignStore(workspace=WORKSPACE)  # v0.2.4
+store = DesignStore(workspace=WORKSPACE)
 _mcp_server = build_mcp(engine, WORKSPACE, store)
 
 _mcp_server.settings.streamable_http_path = "/"
-
 _mcp_server.settings.transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=False,
 )
-
 _mcp_server.settings.stateless_http = True
 _mcp_server.settings.json_response = True
 
@@ -175,7 +153,6 @@ _mcp_asgi_app = _mcp_server.streamable_http_app()
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """Run the FastMCP session manager for the lifetime of the FastAPI app."""
     async with _mcp_server.session_manager.run():
         yield
 
@@ -195,11 +172,10 @@ class RenderRequest(BaseModel):
     name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
     view: str = Field("iso", pattern=r"^[a-z_]{1,16}$")
     with_dimensions: bool = True
-    with_hidden: bool = True  # accepted for API compat; not used in v0
+    with_hidden: bool = True
 
 
 class SectionRequest(BaseModel):
-    """v0.2.6: 2D cross-section render request."""
     name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
     plane: str = Field("YZ", pattern=r"^(XY|XZ|YZ)$")
     at: float = Field(0.0, ge=-10000.0, le=10000.0)
@@ -217,10 +193,12 @@ class PrintabilityRequest(BaseModel):
 
 
 class SaveDesignRequest(BaseModel):
-    """v0.2.4: save a design to the on-disk store."""
+    """v0.2.4: save a design. v0.2.7: optional version param."""
     code: str = Field(..., max_length=MAX_REQUEST_BYTES)
     name: str = Field(..., pattern=NAME_PATTERN, max_length=64)
     description: str = Field("", max_length=500)
+    # v0.2.7: "auto" appends next unused version; int targets that slot.
+    version: Union[int, str] = Field(default="auto")
 
 
 # ── Health ───────────────────────────────────────────────
@@ -318,12 +296,6 @@ def render_multiview_endpoint(req: RenderRequest):
 
 @app.post("/render/section")
 def render_section_endpoint(req: SectionRequest):
-    """v0.2.6: 2D cross-section through the loaded model.
-
-    Slices the geometry on the chosen plane at offset ``at`` mm.
-    Lets you see inside designs without exporting + opening in a slicer.
-    See renderer.render_section() docstring for plane conventions.
-    """
     state = engine.get(req.name)
     if not state or not state.shape:
         raise HTTPException(404, f"No model '{req.name or 'active'}' found")
@@ -336,7 +308,6 @@ def render_section_endpoint(req: SectionRequest):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
-    # Filename encodes plane + at so callers can compare slices
     at_label = f"{req.at:.2f}".replace(".", "p").replace("-", "neg")
     fname = f"{state.name}_section_{req.plane}_{at_label}.png"
     path = RENDERS / fname
@@ -402,11 +373,10 @@ def analyze_printability_endpoint(req: PrintabilityRequest):
     return analyze_printability(state.shape, min_wall_thickness_mm=req.min_wall_thickness)
 
 
-# ── v0.2: workspace file serving (MCP large-file URL fallback) ────
+# ── v0.2: workspace file serving ────
 
 @app.get("/workspace/{filename}")
 def serve_workspace_file(filename: str):
-    """Stream a previously-exported file from the workspace."""
     safe = Path(filename).name
     if safe != filename or not safe:
         raise HTTPException(400, "Invalid filename")
@@ -429,11 +399,11 @@ def serve_workspace_file(filename: str):
     )
 
 
-# ── v0.2.4: persistent design store (REST) ──────────────────
+# ── v0.2.4 + v0.2.7: persistent design store (REST) ──────────────
 
 @app.post("/design/save")
 def save_design(req: SaveDesignRequest):
-    """Save a design's source + metadata to disk. Also executes as a model."""
+    """Save a design version. v0.2.7: optional version param."""
     geometry = None
     execution_result = engine.execute_code(req.code, req.name)
     if execution_result.get("success") and execution_result.get("geometry"):
@@ -441,7 +411,11 @@ def save_design(req: SaveDesignRequest):
 
     try:
         metadata = store.save(
-            req.name, req.code, description=req.description, geometry=geometry
+            req.name,
+            req.code,
+            description=req.description,
+            geometry=geometry,
+            version=req.version,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -464,16 +438,54 @@ def save_design(req: SaveDesignRequest):
 
 @app.get("/design/list")
 def list_designs():
-    """List all saved designs with their metadata (cheap — no re-execution)."""
+    """List all saved designs (latest version of each)."""
     return {"designs": [m.to_dict() for m in store.list_all()]}
 
 
-@app.get("/design/{name}")
-def get_design(name: str):
-    """Load a design's source code + metadata WITHOUT executing."""
+@app.get("/design/{name}/versions")
+def list_design_versions(name: str):
+    """v0.2.7: list all version numbers for a design."""
     _validate_name(name)
     try:
-        code, metadata = store.load(name)
+        versions = store.list_versions(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not versions:
+        raise HTTPException(404, f"Design not found: {name}")
+    return {"name": name, "versions": versions}
+
+
+@app.get("/design/{name}/diff")
+def diff_design(
+    name: str,
+    v1: int = Query(..., ge=1),
+    v2: int = Query(..., ge=1),
+):
+    """v0.2.7: diff two versions of a design.
+
+    Returns unified source diff + geometry deltas (volume, surface area,
+    bbox size). Both versions must exist; use ``/design/{name}/versions``
+    to list available ones first.
+    """
+    _validate_name(name)
+    try:
+        return store.diff(name, v1=v1, v2=v2)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/design/{name}")
+def get_design(
+    name: str,
+    version: Optional[int] = Query(None, ge=1),
+):
+    """Load a design's source code + metadata. v0.2.7: optional version
+    (default = latest)."""
+    _validate_name(name)
+    try:
+        code, metadata = store.load(name, version=version)
     except FileNotFoundError:
         raise HTTPException(404, f"Design not found: {name}")
     except ValueError as e:
@@ -482,26 +494,34 @@ def get_design(name: str):
 
 
 @app.delete("/design/{name}")
-def delete_design(name: str):
-    """Delete a saved design (.py + .json) from disk."""
+def delete_design(
+    name: str,
+    version: Optional[int] = Query(None, ge=1),
+):
+    """Delete design version(s). v0.2.7: optional version (default =
+    nuke all versions)."""
     _validate_name(name)
     try:
-        deleted = store.delete(name)
+        deleted = store.delete(name, version=version)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except OSError as e:
         raise HTTPException(500, f"Delete failed: {e}")
     if not deleted:
         raise HTTPException(404, f"Design not found: {name}")
-    return {"deleted": True, "name": name}
+    return {"deleted": True, "name": name, "version": version}
 
 
 @app.post("/design/{name}/load")
-def load_and_execute_design(name: str):
-    """Load a design from disk + execute it (register as a model)."""
+def load_and_execute_design(
+    name: str,
+    version: Optional[int] = Query(None, ge=1),
+):
+    """Load a design from disk + execute it (register as a model).
+    v0.2.7: optional version (default = latest)."""
     _validate_name(name)
     try:
-        code, metadata = store.load(name)
+        code, metadata = store.load(name, version=version)
     except FileNotFoundError:
         raise HTTPException(404, f"Design not found: {name}")
     except ValueError as e:
@@ -529,6 +549,6 @@ def load_and_execute_design(name: str):
     return result
 
 
-# ── v0.2: MCP Streamable-HTTP transport (mount) ───────────────────
+# ── v0.2: MCP transport mount ───────────────────
 
 app.mount("/mcp", _mcp_asgi_app)
