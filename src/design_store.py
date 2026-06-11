@@ -256,7 +256,10 @@ class DesignStore:
             name: design name (NAME_PATTERN-validated).
             code: build123d Python source (stored verbatim).
             description: optional free-form description.
-            geometry: optional bbox/volume/surface_area snapshot.
+            geometry: optional bbox/volume/surface_area snapshot. As of
+                v0.3.3 the save flow also stuffs face_count / edge_count
+                / vertex_count in here so the version diff can report
+                topology-complexity deltas.
             version: "auto" (default) appends the next unused version;
                      an int targets that specific slot, overwriting any
                      existing content at that version.
@@ -490,8 +493,21 @@ class DesignStore:
             surface_area_delta_mm2: v2 - v1 (or None if unavailable)
             bbox_size_delta_mm: [dx, dy, dz] (v2 size - v1 size)
                                  (or None if unavailable)
+            face_count_delta: v2 - v1 B-rep face count (or None)
+            edge_count_delta: v2 - v1 B-rep edge count (or None)
+            vertex_count_delta: v2 - v1 B-rep vertex count (or None)
             v1_metadata: full metadata dict for v1
             v2_metadata: full metadata dict for v2
+
+        The *_count_delta fields (v0.3.3, issue #13) report B-rep
+        topology complexity change. B-rep counts come from
+        ``shape.faces()/edges()/vertices()`` and are deterministic --
+        unlike mesh triangle counts, which depend on tessellation
+        tolerance and would make the same design diff non-reproducibly.
+        A positive face_count_delta means v2 is structurally more
+        complex than v1 (added bosses, holes, fillets, etc.). These are
+        only populated when both versions were saved with geometry
+        snapshots that captured the counts (saves via v0.3.3+).
 
         Both versions must already exist. Use partsmith_list_versions to
         check available versions first.
@@ -537,6 +553,18 @@ class DesignStore:
             except (TypeError, ValueError):
                 return None
 
+        # v0.3.3 (issue #13): integer topology-complexity deltas.
+        # Deterministic B-rep counts (see docstring) rather than
+        # tessellation-dependent mesh triangle counts.
+        def _int_delta(key: str) -> Optional[int]:
+            a, b = geo1.get(key), geo2.get(key)
+            if a is None or b is None:
+                return None
+            try:
+                return int(b) - int(a)
+            except (TypeError, ValueError):
+                return None
+
         bbox_size_delta = None
         bb1 = geo1.get("bounding_box") or {}
         bb2 = geo2.get("bounding_box") or {}
@@ -562,6 +590,9 @@ class DesignStore:
             "volume_delta_mm3": _delta("volume_mm3"),
             "surface_area_delta_mm2": _delta("surface_area_mm2"),
             "bbox_size_delta_mm": bbox_size_delta,
+            "face_count_delta": _int_delta("face_count"),
+            "edge_count_delta": _int_delta("edge_count"),
+            "vertex_count_delta": _int_delta("vertex_count"),
             "v1_metadata": meta1.to_dict(),
             "v2_metadata": meta2.to_dict(),
         }
