@@ -1,6 +1,6 @@
 [project]
 name = "partsmith"
-version = "0.3.1"
+version = "0.3.2"
 description = "Minimal headless parametric-CAD server (build123d + REST + MCP)"
 license = { text = "MIT" }
 authors = [
@@ -34,7 +34,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
-    "requests>=2.28.0",  # v0.3.1: integration tests HTTP client
+    "requests>=2.28.0",  # integration tests HTTP client (v0.3.1+)
 ]
 
 [project.urls]
