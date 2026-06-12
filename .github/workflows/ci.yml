@@ -18,7 +18,10 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install ruff
-        run: pip install ruff
+        # Pinned for reproducible lint. An unpinned ruff makes CI
+        # nondeterministic — a new release can flag pre-existing code on
+        # an unrelated PR. Bump this deliberately in its own PR.
+        run: pip install ruff==0.15.16
       - name: Lint
         run: ruff check src/ tests/
 
