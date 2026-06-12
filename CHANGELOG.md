@@ -4,6 +4,57 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.5] — 2026-06-12
+
+### Added
+- **Integrity metadata on every MCP file response** (`src/mcp_transport.py`
+  `_file_response`). Every export/render now returns `sha256` and
+  `size_bytes`, so the calling client can verify the bytes it writes to
+  disk (`len == size_bytes` and `sha256` match). This converts a silent
+  truncation — e.g. a shell-heredoc write that got cut off mid-paste —
+  into a caught, retryable error. stdlib `hashlib`, no new dependency.
+- **`url_path` advertised for all workspace-servable exports** (stl/step/3mf),
+  not just files over the 8 MiB inline cap. `engine.export()` already
+  persists to the workspace and `GET /workspace/{filename}` already
+  serves it; this just surfaces the transcription-free fetch path on
+  every export. Render PNGs are not workspace-persisted, so they
+  correctly **omit** `url_path` and stay inline.
+- **`integrity_note` on inline payloads + a rewritten `partsmith_export`
+  docstring** instructing the caller: decode → write bytes → verify;
+  materialize with a real binary write (`base64 -d` / `open(p,'wb')`);
+  **never** paste base64 through a shell heredoc/echo (truncates
+  silently); on mismatch, re-call rather than keep a partial file.
+- **`tests/integration/test_mcp_tools.py::test_export_integrity_metadata`**
+  — asserts the returned `sha256`/`size_bytes` actually match the decoded
+  bytes and that an stl export advertises the correct `url_path`. The
+  section test now also asserts render PNGs carry **no** `url_path`.
+
+### Design notes
+- **Server makes corruption *detectable*; it can't make the client's
+  write correct.** The fix is a verifiable contract (sha + size) plus a
+  fetch fallback, not an attempt to control how the client materializes
+  bytes. Highest-leverage, smallest change.
+- **Scope held tight.** An `inline: bool` flag, a metadata-only export
+  variant, and extending fetchable artifacts to renders (which would
+  need the renders dir served + PNG added to the workspace allow-list,
+  relevant to the heavy-inline-preview token-cap issue) are all
+  deferred until the inline path proves insufficient — per "earn the
+  feature with real demand."
+
+### Why
+Triggered by a real incident: a ~2.3 KB lid STL exported fine
+server-side but the client wrote the inline base64 via a shell heredoc
+that truncated, leaving a missing/corrupt file with no error surfaced.
+partsmith now ships the metadata to catch exactly that. Per ROADMAP
+Theme 4 (validated quality).
+
+Resolves [#18](https://github.com/JLay2026/partsmith/issues/18).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.3.4] — 2026-06-11
 
 ### Added
