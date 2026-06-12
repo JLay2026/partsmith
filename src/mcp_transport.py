@@ -8,7 +8,7 @@ v0.2.6 (issue #8): partsmith_render_section.
 v0.2.7 (issue #3): partsmith_list_versions, partsmith_diff_designs.
                    save/load/delete tools accept optional version.
 v0.3.4 (issue #12): partsmith_render_drawing (dimensioned 2D drawing).
-v0.3.5 (issue #15): robust artifact delivery. Every file response now
+v0.3.5 (issue #18): robust artifact delivery. Every file response now
                    carries sha256 + size_bytes so a client can verify
                    the bytes it materializes (catches silent truncation,
                    e.g. a shell-heredoc write that got cut off), and
@@ -520,4 +520,3 @@ def build_mcp(
         return {"deleted": deleted, "name": name, "version": version}
 
     return mcp
-MCPEOF
