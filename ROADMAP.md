@@ -4,10 +4,10 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-06-12 (post-v0.3.5 — Sprint A closed two Theme 2
-items: cross-section fill + topology deltas v0.3.3, dimensioned drawings
-v0.3.4. v0.3.5 added robust artifact delivery (Theme 4). Renderer-swap
-spike remains).
+**Last updated:** 2026-06-12 (post-v0.3.6 — Theme 2 substantially done
+(cross-section + fill/deltas + drawings); Theme 4 hardened delivery
+(v0.3.5 verifiable file responses, v0.3.6 opt-in capped preview).
+Renderer-swap spike #14 remains).
 
 ---
 
@@ -18,7 +18,7 @@ spike remains).
 | Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 backlog) |
 | Theme 2 — Output fidelity | 🟡 In progress (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; renderer swap remains) |
 | Theme 3 — Print workflow | ⬜ Not started |
-| Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 robust artifact delivery v0.3.5) |
+| Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
 ---
@@ -107,24 +107,27 @@ The four v0.2.x deploy bugs (see CHANGELOG) would have been caught by
 integration tests against a containerized partsmith. **The full suite
 now exists** (v0.3.1 framework + v0.3.2 completion) and runs on every PR.
 **v0.3.5** added a verifiable file-delivery contract after a real
-silent-truncation incident.
+silent-truncation incident; **v0.3.6** made the create preview opt-in +
+capped, killing the last unbounded inline payload.
 
 | Issue | Item | Status |
 |---|---|---|
 | [#5](https://github.com/JLay2026/partsmith/issues/5) | pytest integration suite + GitHub Actions CI | ✅ Complete — framework v0.3.1, full suite v0.3.2 |
 | [#18](https://github.com/JLay2026/partsmith/issues/18) | Robust artifact delivery — sha256 + size_bytes + url_path fallback on file responses | ✅ Shipped v0.3.5 |
+| [#20](https://github.com/JLay2026/partsmith/issues/20) | Opt-in, capped create/modify/load preview (no more unbounded auto-PNG) | ✅ Shipped v0.3.6 |
 
 **Shipped:**
 - `ci.yml` lightweight pytest job (ruff + `tests/test_versioning.py` on every PR, ~30s)
 - `integration.yml` — builds the container, starts it, runs `tests/integration/` against `/health` + `/mcp/`
 - Integration files: `test_health`, `test_mcp_handshake` (v0.3.1);
   `test_mcp_tools` (create→export→section→drawing round-trips + export
-  integrity metadata), `test_caddy_compat` (X-Forwarded-Proto scheme
-  check) (v0.3.2+)
-- Catches the v0.2.1/v0.2.2/v0.2.3 regression classes in a single MCP handshake test
+  integrity metadata + preview opt-in), `test_caddy_compat`
+  (X-Forwarded-Proto scheme check) (v0.3.2+)
 - v0.3.5: every MCP file response carries `sha256` + `size_bytes`
   (catches silent truncation on the client write) and exports advertise
   a fetchable `url_path` fallback
+- v0.3.6: `create_model`/`modify_model`/`load_design` preview is opt-in
+  (`include_preview`, default off), downscaled + capped when requested
 
 ---
 
@@ -162,6 +165,7 @@ v0.3.2  ✅ Theme 4 #5 — integration suite completed (mcp_tools, caddy_compat)
 v0.3.3  ✅ Theme 2 #13 — cross-section fill + topology deltas
 v0.3.4  ✅ Theme 2 #12 — dimensioned drawings
 v0.3.5  ✅ Theme 4 #18 — robust artifact delivery (sha256 + url_path on file responses)
+v0.3.6  ✅ Theme 4 #20 — opt-in, capped create preview
 ---- you are here ----
 v0.3.x  — Theme 2 #14 renderer-swap spike (likely declined) or feature callouts
 v0.5.0  — Theme 3 (3MF metadata, pre-slicing analysis)

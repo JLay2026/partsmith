@@ -14,6 +14,11 @@ v0.3.5 (issue #18): robust artifact delivery. Every file response now
                    e.g. a shell-heredoc write that got cut off), and
                    exports always expose a fetchable url_path fallback,
                    not just files over the inline cap.
+v0.3.6 (issue #20): create/modify/load preview is now opt-in
+                   (include_preview, default False) and, when requested,
+                   downscaled + capped so it can never blow the client's
+                   response token budget. Previously every create
+                   embedded a full 800x600 iso PNG unconditionally.
 """
 from __future__ import annotations
 
@@ -39,6 +44,14 @@ from .renderer import (
 
 INLINE_MAX_BYTES = int(
     os.environ.get("PARTSMITH_INLINE_MAX_BYTES", str(8 * 1024 * 1024))
+)
+
+# v0.3.6: opt-in create/modify/load preview. Rendered small and capped
+# well below the chat-client response budget so it can never overflow it
+# (a full 800x600 iso PNG was ~75-150 KB -> ~25k+ tokens of base64).
+PREVIEW_SIZE = (384, 288)
+PREVIEW_INLINE_MAX = int(
+    os.environ.get("PARTSMITH_PREVIEW_INLINE_MAX", str(48 * 1024))
 )
 
 # Extensions that GET /workspace/{filename} will actually serve (the
@@ -115,15 +128,26 @@ def build_mcp(
     """Build a FastMCP server exposing partsmith tools."""
     mcp = FastMCP("partsmith")
 
-    def _do_create(code: str, name: str) -> dict:
+    def _do_create(code: str, name: str, include_preview: bool = False) -> dict:
         result = engine.execute_code(code, name)
-        if result.get("success") and result.get("geometry"):
+        if include_preview and result.get("success") and result.get("geometry"):
             state = engine.get(name)
             if state and state.shape:
                 try:
-                    png = render_3d(state.shape, view="iso")
-                    result["preview_data_b64"] = base64.b64encode(png).decode("ascii")
-                    result["preview_content_type"] = "image/png"
+                    png = render_3d(state.shape, view="iso", size=PREVIEW_SIZE)
+                    if len(png) <= PREVIEW_INLINE_MAX:
+                        result["preview_data_b64"] = base64.b64encode(png).decode(
+                            "ascii"
+                        )
+                        result["preview_content_type"] = "image/png"
+                        result["preview_size_bytes"] = len(png)
+                        result["preview_sha256"] = hashlib.sha256(png).hexdigest()
+                    else:
+                        result["preview_note"] = (
+                            f"Preview ({len(png)} bytes) exceeds the "
+                            f"{PREVIEW_INLINE_MAX}-byte inline cap; call "
+                            "partsmith_render_3d for a full render."
+                        )
                 except Exception as e:
                     result["preview_error"] = str(e)
         return result
@@ -144,7 +168,11 @@ def build_mcp(
         }
 
     @mcp.tool()
-    def partsmith_create_model(code: str, name: str = "default") -> dict:
+    def partsmith_create_model(
+        code: str,
+        name: str = "default",
+        include_preview: bool = False,
+    ) -> dict:
         """Execute build123d Python code and register the resulting shape.
 
         Execution namespace includes ``from build123d import *``,
@@ -154,13 +182,30 @@ def build_mcp(
 
         Models are in-memory only. Use partsmith_save_design to persist
         source code that survives container restart (versioned).
+
+        Args:
+            code: build123d source. Assign the final shape to ``result``.
+            name: Model identifier (default "default").
+            include_preview: When True, embed a small inline iso PNG
+                (preview_data_b64 + preview_sha256/size_bytes), capped so
+                it can't overflow the response. Default False -- keeps the
+                response light; call partsmith_render_3d when you actually
+                want to see the model.
         """
-        return _do_create(code, name)
+        return _do_create(code, name, include_preview=include_preview)
 
     @mcp.tool()
-    def partsmith_modify_model(code: str, name: str = "default") -> dict:
-        """Re-execute build123d code under an existing model name."""
-        return _do_create(code, name)
+    def partsmith_modify_model(
+        code: str,
+        name: str = "default",
+        include_preview: bool = False,
+    ) -> dict:
+        """Re-execute build123d code under an existing model name.
+
+        See partsmith_create_model for ``include_preview`` (default
+        False; opt in for a small inline preview).
+        """
+        return _do_create(code, name, include_preview=include_preview)
 
     @mcp.tool()
     def partsmith_list_models() -> dict:
@@ -398,6 +443,7 @@ def build_mcp(
     def partsmith_load_design(
         name: str,
         version: Optional[int] = None,
+        include_preview: bool = False,
     ) -> dict:
         """Load a saved design from disk and execute it as a model.
 
@@ -408,6 +454,8 @@ def build_mcp(
         Args:
             name: Design identifier (must exist in the design store).
             version: Specific version int, or None (default) for latest.
+            include_preview: When True, embed a small inline iso PNG
+                (default False; see partsmith_create_model).
 
         Returns same shape as partsmith_create_model plus:
             loaded_from: "design_store"
@@ -420,7 +468,7 @@ def build_mcp(
         except ValueError as e:
             return {"error": f"Invalid name or version: {e}"}
 
-        result = _do_create(code, name)
+        result = _do_create(code, name, include_preview=include_preview)
         result["loaded_from"] = "design_store"
         result["design_metadata"] = metadata.to_dict()
         return result

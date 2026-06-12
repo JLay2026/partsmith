@@ -4,6 +4,52 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.6] — 2026-06-12
+
+### Changed
+- **`create_model` / `modify_model` / `load_design` preview is now
+  opt-in** (`src/mcp_transport.py` `_do_create`). New `include_preview`
+  parameter, **default `False`**. Previously every create/modify/load
+  unconditionally embedded a full 800×600 iso PNG as inline base64
+  (~75–150 KB → ~25 K+ tokens), which overflowed the calling client's
+  response token budget on every call. Default responses are now just
+  `success` + `geometry` + `stdout` (tiny).
+- **When requested, the preview is downscaled + capped.** Rendered at
+  384×288 and gated behind `PARTSMITH_PREVIEW_INLINE_MAX` (default
+  48 KB); if it still exceeds the cap the bytes are dropped and a
+  `preview_note` points the caller at `partsmith_render_3d`. Inline
+  previews now carry `preview_size_bytes` + `preview_sha256` for parity
+  with the v0.3.5 file-delivery contract.
+
+### Added
+- **`tests/integration/test_mcp_tools.py::test_create_model_preview_optional`**
+  — asserts a default create carries no `preview_data_b64`, and that
+  `include_preview=True` yields either a capped, sha-verifiable inline
+  preview or a `preview_note` (never an unbounded raw embed). The
+  existing round-trip test now asserts the default-no-preview contract.
+
+### Migration note
+This changes the default MCP create/modify/load response shape:
+`preview_data_b64` no longer appears unless `include_preview=True`.
+Callers that relied on the auto-preview should either pass
+`include_preview=True` or call `partsmith_render_3d` explicitly. REST
+`create_model` is unchanged (HTTP clients aren't subject to the chat
+token cap).
+
+### Why
+The auto-preview was the last unbounded inline payload after #18 made
+exports verifiable. It provided little value (most creates are followed
+by `measure` or an explicit render) at the cost of overflowing every
+create response. Default-off makes `create_model` lightweight and
+predictable. Per ROADMAP Theme 4 (validated quality).
+
+Resolves [#20](https://github.com/JLay2026/partsmith/issues/20).
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.3.5] — 2026-06-12
 
 ### Added
@@ -189,26 +235,11 @@ delivered: all four originally-scoped integration test files exist
 transport, the tool inventory, real tool execution, and proxy-header
 handling on every PR.
 
-### Design notes
-- **Defensive result parsing.** FastMCP's exact tools/call response
-  shape (structuredContent vs. content[0].text) varies by version;
-  `_tool_result_dict()` handles both so a FastMCP bump doesn't
-  spuriously break the round-trip test.
-- **Conditional skip on the scheme test.** The slash-redirect behavior
-  is server/version-dependent; the test guards the regression when the
-  redirect exists and skips cleanly otherwise rather than asserting on
-  behavior that may not be present. The baseline
-  `test_forwarded_headers_accepted` always runs.
-- **Still no new runtime deps.** Tests use `requests` (already a dev
-  dep since v0.3.1). The integration container has the full stack;
-  these tests just drive it over HTTP.
-
 ### Why
 v0.3.1 shipped the CI framework + transport/inventory tests but
-deferred the two heavier tests to keep that ship tight. With the
-framework proven green across the v0.3.1 merge, completing the suite
-now means real tool execution + proxy-header handling are both under
-regression guard before Theme 2 (output fidelity) work begins.
+deferred the two heavier tests to keep that ship tight. Completing the
+suite now means real tool execution + proxy-header handling are both
+under regression guard before Theme 2 (output fidelity) work begins.
 
 Per ROADMAP Theme 4 ("Validated quality").
 
@@ -225,77 +256,20 @@ See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
   Installs only `pytest + fastapi + pydantic` (~10 sec); tests that
   need build123d / trimesh / matplotlib run against the real container
   via the integration workflow instead.
-- **`.github/workflows/integration.yml`.** New separate workflow that:
-  1. Builds the partsmith image from the current branch (Buildx +
-     GH Actions cache; ~30 sec on warm cache, ~5 min first time)
-  2. Starts the container on 127.0.0.1:8123, waits up to 90s for
-     `/health` to return 200
-  3. Runs `pytest tests/integration/` with `PARTSMITH_URL` set
-  4. Dumps `docker logs partsmith` on failure for diagnosis
-- **`tests/integration/`** suite (initial scaffold + 3 tests):
-  - `conftest.py` — `partsmith_url` fixture; skips if
-    `PARTSMITH_URL` env unset so local pytest discovery is harmless
-  - `test_health.py:test_health_returns_200_with_version` — REST
-    `/health` smoke. Catches v0.1.2-class deploy regressions
-    (port-bind failure, FastAPI lifespan crash, etc.)
-  - `test_mcp_handshake.py:test_mcp_initialize_returns_partsmith_serverinfo`
-    — POST `/mcp/` initialize. Catches v0.2.1 (lifespan / URL prefix),
-    v0.2.2 (DNS rebinding 421), v0.2.3 (stateful long-poll hang)
-    regressions
-  - `test_mcp_handshake.py:test_mcp_tools_list_includes_expected_surface`
-    — verifies the full v0.2.0 + v0.2.4 + v0.2.6 + v0.2.7 tool surface
-    is exposed; banded by version cohort so a missing tool is a clear
-    signal of which release regressed
-- **`requests>=2.28.0`** dev dependency for integration test HTTP client.
-
-### Deferred to a future patch (v0.3.2 or later)
-Issue [#5](https://github.com/JLay2026/partsmith/issues/5) originally
-scoped four integration test files. Shipped 2/4 here; the other 2 land
-as a follow-up once this framework has proven stable in CI for a week
-or two of actual PRs:
-
-- `test_mcp_tools.py` — full round-trip: initialize → call
-  `partsmith_create_model` with a cube → verify success + geometry +
-  preview_data_b64 → call `partsmith_export` → verify STL bytes
-  decodable. Higher complexity (chain of MCP tool calls), value is
-  important but deferred to keep the v0.3.1 ship surface tight.
-- `test_caddy_compat.py` — verify uvicorn handles `X-Forwarded-Proto:
-  https` correctly. Catches the v0.2.1 scheme-downgrade regression.
-  Easy to add but separate concern.
-
-### Design notes
-- **Two workflows, not one.** Lightweight CI (ruff + pytest) runs in
-  ~30 sec and gates every PR. Integration runs in 1-5 min and runs
-  alongside but doesn't block. Separation means a build123d API drift
-  doesn't sneak in just because pip cache went stale.
-- **`PARTSMITH_URL` env var, not testcontainers-python.** The
-  `testcontainers` library adds a dep, complicates local dev, and
-  doesn't materially simplify the CI workflow over plain
-  `docker run + curl + pytest`. Skipped per the project's
-  "small over capable" toolkit preference.
-- **Local-dev story preserved.** `conftest.py` skips if
-  `PARTSMITH_URL` is unset, so `pytest tests/integration/ -v` on a
-  laptop without a running container just says "skipped". Run with
-  `PARTSMITH_URL=http://127.0.0.1:8123 pytest tests/integration/ -v`
-  against a local container to validate before pushing.
-- **GH Actions cache for Docker layers.** `cache-from / cache-to type=gha`
-  on the buildx step means subsequent runs reuse the OpenCASCADE Python
-  wheel layer (the expensive part). First-PR build is ~5 min; rebuilds
-  on the same branch are ~30 sec.
+- **`.github/workflows/integration.yml`.** New separate workflow that
+  builds the partsmith image, starts the container on 127.0.0.1:8123,
+  waits for `/health`, and runs `tests/integration/` with
+  `PARTSMITH_URL` set.
+- **`tests/integration/`** suite (scaffold + 3 tests): `conftest.py`
+  (`partsmith_url` fixture; skips if unset), `test_health.py`,
+  `test_mcp_handshake.py` (initialize + tool inventory).
+- **`requests>=2.28.0`** dev dependency for the integration HTTP client.
 
 ### Why
 v0.2.x shipped four deploy bugs (lifespan, double-prefix path, scheme
-downgrade, DNS rebinding) that would have been caught in 5 minutes by a
-container-based integration test. Cost was ~5 hours of evening debugging
-across the v0.2.0 → v0.2.3 cycle. This is the boring defensive layer
-that protects every future feature ship.
-
-Resolves the immediate ask of [#5](https://github.com/JLay2026/partsmith/issues/5)
-(pytest integration suite + GH Actions CI workflow exist + run on every
-PR). Two integration tests remain to land in a follow-up.
-
-Per ROADMAP Theme 4 ("Validated quality"). Fifth v0.3.x item to ship,
-and the one that protects investment in everything else.
+downgrade, DNS rebinding) that a container-based integration test would
+have caught in 5 minutes. This is the boring defensive layer that
+protects every future feature ship. Per ROADMAP Theme 4.
 
 ### Commit
 See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
