@@ -2,13 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Integration: full MCP tool-call round-trip.
 
-Initialize -> partsmith_create_model (cube) -> verify geometry +
-preview -> partsmith_export (STL) -> verify decodable STL bytes.
-
-This is the v0.3.2 completion of issue #5: where test_mcp_handshake
-proves the transport + tool inventory, this proves the tools actually
-*execute* end-to-end against a real build123d + trimesh stack inside
-the container.
+Initialize -> partsmith_create_model (cube) -> verify geometry ->
+partsmith_export (STL) -> verify decodable STL bytes. Plus preview
+opt-in (v0.3.6) and export integrity metadata (v0.3.5).
 """
 
 import base64
@@ -52,19 +48,16 @@ def _initialize(partsmith_url):
 def _tool_result_dict(rpc_response_body):
     """Extract the tool's dict result from a tools/call JSON-RPC response.
 
-    FastMCP can surface a tool's dict return as ``structuredContent`` and/or
-    a JSON string in ``content[0].text``. Parse defensively so the test
-    isn't coupled to one wrapping.
+    FastMCP can surface a tool's dict return as structuredContent and/or
+    a JSON string in content[0].text. Parse defensively so the test isn't
+    coupled to one wrapping.
     """
     result = rpc_response_body.get("result", {})
-    # Preferred: structuredContent (FastMCP puts dict returns here)
     if isinstance(result.get("structuredContent"), dict):
         sc = result["structuredContent"]
-        # Some FastMCP versions wrap the dict under a "result" key
         if set(sc.keys()) == {"result"} and isinstance(sc["result"], dict):
             return sc["result"]
         return sc
-    # Fallback: content[0].text as JSON
     content = result.get("content", [])
     if content and isinstance(content, list):
         first = content[0]
@@ -82,13 +75,12 @@ def _tool_result_dict(rpc_response_body):
 def test_create_model_then_export_roundtrip(partsmith_url):
     """create_model(cube) -> geometry; export(stl) -> valid STL bytes.
 
-    Note: as of v0.3.6 create_model does NOT embed a preview by default
-    (see test_create_model_preview_optional for the opt-in path).
+    As of v0.3.6 create_model does NOT embed a preview by default (see
+    test_create_model_preview_optional for the opt-in path).
     """
     init = _initialize(partsmith_url)
     assert init.status_code == 200, f"initialize failed: {init.status_code}"
 
-    # 1. Create a 20mm cube
     create = _rpc(
         partsmith_url,
         "tools/call",
@@ -110,7 +102,6 @@ def test_create_model_then_export_roundtrip(partsmith_url):
     )
     geom = create_result.get("geometry")
     assert geom is not None, "create_model returned no geometry"
-    # 20mm cube => 8000 mm^3
     assert abs(geom["volume_mm3"] - 8000.0) < 1.0, (
         f"Expected ~8000 mm^3 for a 20mm cube, got {geom.get('volume_mm3')!r}"
     )
@@ -118,12 +109,10 @@ def test_create_model_then_export_roundtrip(partsmith_url):
     assert bbox["size"] == [20.0, 20.0, 20.0], (
         f"Expected 20x20x20 bbox, got {bbox.get('size')!r}"
     )
-    # v0.3.6: no preview unless asked
     assert "preview_data_b64" not in create_result, (
         "default create_model should not embed a preview"
     )
 
-    # 2. Export to STL
     export = _rpc(
         partsmith_url,
         "tools/call",
@@ -142,8 +131,6 @@ def test_create_model_then_export_roundtrip(partsmith_url):
     )
     stl_bytes = base64.b64decode(export_result["data_b64"])
     assert len(stl_bytes) > 0, "exported STL is empty"
-    # Binary STL: 80-byte header + 4-byte triangle count, then 50 bytes/tri.
-    # A box is 12 triangles. ASCII STL starts with b"solid". Accept either.
     is_binary_stl = len(stl_bytes) >= 84
     is_ascii_stl = stl_bytes[:5].lower() == b"solid"
     assert is_binary_stl or is_ascii_stl, (
@@ -155,14 +142,10 @@ def test_create_model_then_export_roundtrip(partsmith_url):
 def test_create_model_preview_optional(partsmith_url):
     """v0.3.6 (#20): preview is opt-in. Default omits it; include_preview
     yields a capped, verifiable inline PNG.
-
-    Regression guard for the unbounded-auto-preview bug that overflowed
-    the client response budget on every create.
     """
     init = _initialize(partsmith_url)
     assert init.status_code == 200
 
-    # Default: no preview
     default = _rpc(
         partsmith_url,
         "tools/call",
@@ -182,7 +165,6 @@ def test_create_model_preview_optional(partsmith_url):
         f"default create should carry no preview: keys={list(default_result)}"
     )
 
-    # Opt-in: small, capped, verifiable preview
     withp = _rpc(
         partsmith_url,
         "tools/call",
@@ -201,13 +183,11 @@ def test_create_model_preview_optional(partsmith_url):
     )
     r = _tool_result_dict(withp.json())
     assert r.get("success") is True
-    # Either an inline preview (within cap) or a preview_note if it was
-    # over the cap -- both are acceptable; an unbounded raw embed is not.
     if "preview_data_b64" in r:
         png = base64.b64decode(r["preview_data_b64"])
         assert png[:8] == b"\x89PNG\r\n\x1a\n", "preview is not a PNG"
         assert r["preview_size_bytes"] == len(png), (
-            "preview_size_bytes != decoded preview length"
+            "preview_size_bytes mismatch vs decoded preview length"
         )
         assert hashlib.sha256(png).hexdigest() == r["preview_sha256"], (
             "preview_sha256 does not match decoded preview bytes"
@@ -221,10 +201,6 @@ def test_create_model_preview_optional(partsmith_url):
 def test_export_integrity_metadata(partsmith_url):
     """v0.3.5 (#18): export carries sha256 + size_bytes that match the
     decoded bytes, plus a fetchable url_path for stl/step/3mf.
-
-    This is the regression guard for the silent-truncation class of bug:
-    a client that writes the bytes can now compare against these to catch
-    a partial/corrupt write deterministically.
     """
     init = _initialize(partsmith_url)
     assert init.status_code == 200
@@ -256,29 +232,25 @@ def test_export_integrity_metadata(partsmith_url):
     )
     r = _tool_result_dict(export.json())
 
-    # Metadata present
     assert "sha256" in r, f"export missing sha256: {r!r}"
     assert "size_bytes" in r, f"export missing size_bytes: {r!r}"
     assert r.get("inline") is True, f"expected tiny STL inline: {r!r}"
 
-    # url_path advertised for an stl export (workspace-servable)
     assert r.get("url_path") == "/workspace/ci-integrity-box.stl", (
         f"expected fetchable url_path for stl, got {r.get('url_path')!r}"
     )
 
-    # The integrity fields must actually match the delivered bytes —
-    # this is exactly the check a client performs to detect truncation.
     data = base64.b64decode(r["data_b64"])
     assert len(data) == r["size_bytes"], (
         f"size_bytes {r['size_bytes']} != decoded len {len(data)}"
     )
     assert hashlib.sha256(data).hexdigest() == r["sha256"], (
-        "sha256 does not match decoded bytes — integrity contract broken"
+        "sha256 does not match decoded bytes: integrity contract broken"
     )
 
 
 def test_render_section_via_mcp(partsmith_url):
-    """create_model -> render_section returns an inline PNG (v0.2.6 tool live)."""
+    """create_model -> render_section returns an inline PNG (v0.2.6 tool)."""
     init = _initialize(partsmith_url)
     assert init.status_code == 200
 
@@ -311,14 +283,13 @@ def test_render_section_via_mcp(partsmith_url):
     assert result.get("inline") is True, f"Expected inline PNG, got {result!r}"
     png = base64.b64decode(result["data_b64"])
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "section render is not a PNG"
-    # v0.3.5: PNG renders are not workspace-servable -> no url_path
     assert "url_path" not in result, (
         f"render PNG should not advertise url_path: {result!r}"
     )
 
 
 def test_render_drawing_via_mcp(partsmith_url):
-    """create_model -> render_drawing returns an inline PNG (v0.3.4 tool live)."""
+    """create_model -> render_drawing returns an inline PNG (v0.3.4 tool)."""
     init = _initialize(partsmith_url)
     assert init.status_code == 200
 
