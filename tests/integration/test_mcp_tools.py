@@ -80,7 +80,11 @@ def _tool_result_dict(rpc_response_body):
 
 
 def test_create_model_then_export_roundtrip(partsmith_url):
-    """create_model(cube) -> geometry + preview; export(stl) -> valid STL bytes."""
+    """create_model(cube) -> geometry; export(stl) -> valid STL bytes.
+
+    Note: as of v0.3.6 create_model does NOT embed a preview by default
+    (see test_create_model_preview_optional for the opt-in path).
+    """
     init = _initialize(partsmith_url)
     assert init.status_code == 200, f"initialize failed: {init.status_code}"
 
@@ -114,11 +118,10 @@ def test_create_model_then_export_roundtrip(partsmith_url):
     assert bbox["size"] == [20.0, 20.0, 20.0], (
         f"Expected 20x20x20 bbox, got {bbox.get('size')!r}"
     )
-    # Preview PNG should be present + look like a PNG
-    preview_b64 = create_result.get("preview_data_b64")
-    assert preview_b64, "create_model returned no preview_data_b64"
-    preview_bytes = base64.b64decode(preview_b64)
-    assert preview_bytes[:8] == b"\x89PNG\r\n\x1a\n", "preview is not a PNG"
+    # v0.3.6: no preview unless asked
+    assert "preview_data_b64" not in create_result, (
+        "default create_model should not embed a preview"
+    )
 
     # 2. Export to STL
     export = _rpc(
@@ -147,6 +150,72 @@ def test_create_model_then_export_roundtrip(partsmith_url):
         f"exported bytes don't look like STL (len={len(stl_bytes)}, "
         f"head={stl_bytes[:16]!r})"
     )
+
+
+def test_create_model_preview_optional(partsmith_url):
+    """v0.3.6 (#20): preview is opt-in. Default omits it; include_preview
+    yields a capped, verifiable inline PNG.
+
+    Regression guard for the unbounded-auto-preview bug that overflowed
+    the client response budget on every create.
+    """
+    init = _initialize(partsmith_url)
+    assert init.status_code == 200
+
+    # Default: no preview
+    default = _rpc(
+        partsmith_url,
+        "tools/call",
+        {
+            "name": "partsmith_create_model",
+            "arguments": {
+                "code": "from build123d import *\nresult = Box(15, 15, 15)",
+                "name": "ci-preview-default",
+            },
+        },
+        req_id=2,
+    )
+    assert default.status_code == 200
+    default_result = _tool_result_dict(default.json())
+    assert default_result.get("success") is True
+    assert "preview_data_b64" not in default_result, (
+        f"default create should carry no preview: keys={list(default_result)}"
+    )
+
+    # Opt-in: small, capped, verifiable preview
+    withp = _rpc(
+        partsmith_url,
+        "tools/call",
+        {
+            "name": "partsmith_create_model",
+            "arguments": {
+                "code": "from build123d import *\nresult = Box(15, 15, 15)",
+                "name": "ci-preview-on",
+                "include_preview": True,
+            },
+        },
+        req_id=3,
+    )
+    assert withp.status_code == 200, (
+        f"create w/ preview returned {withp.status_code}: {withp.text[:300]}"
+    )
+    r = _tool_result_dict(withp.json())
+    assert r.get("success") is True
+    # Either an inline preview (within cap) or a preview_note if it was
+    # over the cap -- both are acceptable; an unbounded raw embed is not.
+    if "preview_data_b64" in r:
+        png = base64.b64decode(r["preview_data_b64"])
+        assert png[:8] == b"\x89PNG\r\n\x1a\n", "preview is not a PNG"
+        assert r["preview_size_bytes"] == len(png), (
+            "preview_size_bytes != decoded preview length"
+        )
+        assert hashlib.sha256(png).hexdigest() == r["preview_sha256"], (
+            "preview_sha256 does not match decoded preview bytes"
+        )
+    else:
+        assert "preview_note" in r, (
+            f"preview omitted but no preview_note explaining why: {list(r)}"
+        )
 
 
 def test_export_integrity_metadata(partsmith_url):
