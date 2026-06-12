@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.svg" alt="partsmith" width="96" height="96">
+  <img src="assets/icon-flat.svg" alt="partsmith" width="112" height="112">
 </p>
 
 # partsmith
