@@ -568,4 +568,3 @@ def build_mcp(
         return {"deleted": deleted, "name": name, "version": version}
 
     return mcp
-MCPEOF
