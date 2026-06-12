@@ -12,6 +12,7 @@ the container.
 """
 
 import base64
+import hashlib
 import json
 
 import requests
@@ -148,6 +149,65 @@ def test_create_model_then_export_roundtrip(partsmith_url):
     )
 
 
+def test_export_integrity_metadata(partsmith_url):
+    """v0.3.5 (#18): export carries sha256 + size_bytes that match the
+    decoded bytes, plus a fetchable url_path for stl/step/3mf.
+
+    This is the regression guard for the silent-truncation class of bug:
+    a client that writes the bytes can now compare against these to catch
+    a partial/corrupt write deterministically.
+    """
+    init = _initialize(partsmith_url)
+    assert init.status_code == 200
+
+    _rpc(
+        partsmith_url,
+        "tools/call",
+        {
+            "name": "partsmith_create_model",
+            "arguments": {
+                "code": "from build123d import *\nresult = Box(12, 8, 5)",
+                "name": "ci-integrity-box",
+            },
+        },
+        req_id=2,
+    )
+
+    export = _rpc(
+        partsmith_url,
+        "tools/call",
+        {
+            "name": "partsmith_export",
+            "arguments": {"name": "ci-integrity-box", "format": "stl"},
+        },
+        req_id=3,
+    )
+    assert export.status_code == 200, (
+        f"export call returned {export.status_code}: {export.text[:300]}"
+    )
+    r = _tool_result_dict(export.json())
+
+    # Metadata present
+    assert "sha256" in r, f"export missing sha256: {r!r}"
+    assert "size_bytes" in r, f"export missing size_bytes: {r!r}"
+    assert r.get("inline") is True, f"expected tiny STL inline: {r!r}"
+
+    # url_path advertised for an stl export (workspace-servable)
+    assert r.get("url_path") == "/workspace/ci-integrity-box.stl", (
+        f"expected fetchable url_path for stl, got {r.get('url_path')!r}"
+    )
+
+    # The integrity fields must actually match the delivered bytes —
+    # this is exactly the check a client performs to detect truncation.
+    data = base64.b64decode(r["data_b64"])
+    assert len(data) == r["size_bytes"], (
+        f"size_bytes {r['size_bytes']} != decoded len {len(data)}"
+    )
+    assert hashlib.sha256(data).hexdigest() == r["sha256"], (
+        "sha256 does not match decoded bytes — integrity contract broken"
+    )
+
+
 def test_render_section_via_mcp(partsmith_url):
     """create_model -> render_section returns an inline PNG (v0.2.6 tool live)."""
     init = _initialize(partsmith_url)
@@ -182,6 +242,10 @@ def test_render_section_via_mcp(partsmith_url):
     assert result.get("inline") is True, f"Expected inline PNG, got {result!r}"
     png = base64.b64decode(result["data_b64"])
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "section render is not a PNG"
+    # v0.3.5: PNG renders are not workspace-servable -> no url_path
+    assert "url_path" not in result, (
+        f"render PNG should not advertise url_path: {result!r}"
+    )
 
 
 def test_render_drawing_via_mcp(partsmith_url):
