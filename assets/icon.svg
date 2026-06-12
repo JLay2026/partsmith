@@ -3,18 +3,89 @@
   SPDX-FileCopyrightText: 2026 JLay2026
   SPDX-License-Identifier: MIT
 
-  Placeholder partsmith icon. Isometric cube using the renderer's
-  Lambertian-shading palette (top face lightest, right face darkest).
-  Replace with a real branded icon when one is designed.
+  partsmith app icon — "forging a digital part": an ember-hot isometric
+  part (with parametric node vertices) being forged above an anvil, on a
+  slate ground. Palette reuses the renderer's blue-grey body plus the
+  cross-section ember accent (#c98f6b). Rounded-square tile for the
+  ZimaOS dashboard + favicon. See assets/icon-flat.svg for the
+  background-less variant (README / in-app).
 
   Rendered at 256x256; scales cleanly. Used by zimaboard-services
   ZimaOS Custom Install (x-casaos.icon).
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect width="256" height="256" rx="40" fill="#3a4a5e"/>
-  <g stroke="#1a2a3e" stroke-width="3" stroke-linejoin="round">
-    <polygon points="128,52 200,94 128,136 56,94" fill="#bdd0e3"/>
-    <polygon points="56,94 128,136 128,212 56,170" fill="#7a90a9"/>
-    <polygon points="200,94 128,136 128,212 200,170" fill="#5a6e85"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="partsmith — forging a digital part">
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d3d4d"/>
+      <stop offset="1" stop-color="#1e2934"/>
+    </linearGradient>
+    <linearGradient id="anvil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eaf0f7"/>
+      <stop offset="1" stop-color="#bfcbda"/>
+    </linearGradient>
+    <linearGradient id="cubeTop" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#f6c089"/>
+      <stop offset="1" stop-color="#d88f54"/>
+    </linearGradient>
+    <linearGradient id="cubeLeft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bccbdc"/>
+      <stop offset="1" stop-color="#93a8c0"/>
+    </linearGradient>
+    <linearGradient id="cubeRight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8397ad"/>
+      <stop offset="1" stop-color="#5f7388"/>
+    </linearGradient>
+    <radialGradient id="heat" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffb86b" stop-opacity="0.6"/>
+      <stop offset="0.6" stop-color="#ff9d52" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ff9d52" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sheen" cx="0.5" cy="0.32" r="0.6">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="shadow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+
+  <!-- ground -->
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="url(#ground)"/>
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="url(#sheen)"/>
+
+  <!-- forge heat radiating between the part and the anvil (centered) -->
+  <ellipse cx="128" cy="124" rx="58" ry="40" fill="url(#heat)" filter="url(#soft)"/>
+
+  <!-- contact shadow under the anvil (centered) -->
+  <ellipse cx="128" cy="218" rx="60" ry="11" fill="#11181f" fill-opacity="0.55" filter="url(#shadow)"/>
+
+  <!-- digital part: isometric cube centered on x=128, ember-hot top, parametric nodes -->
+  <g stroke="#243140" stroke-width="2" stroke-linejoin="round">
+    <polygon points="86,66 128,89 128,133 86,110" fill="url(#cubeLeft)"/>
+    <polygon points="170,66 128,89 128,133 170,110" fill="url(#cubeRight)"/>
+    <polygon points="128,43 170,66 128,89 86,66" fill="url(#cubeTop)"/>
   </g>
+  <polyline points="128,43 170,66 128,89" fill="none" stroke="#ffd6a3" stroke-width="1.6" stroke-opacity="0.7" stroke-linejoin="round"/>
+  <g fill="#eef3f9" stroke="#243140" stroke-width="1.2">
+    <circle cx="128" cy="43" r="3.4"/>
+    <circle cx="170" cy="66" r="3.4"/>
+    <circle cx="86"  cy="66" r="3.4"/>
+    <circle cx="128" cy="89" r="3.1"/>
+  </g>
+
+  <!-- forge sparks -->
+  <g fill="#ffd29a">
+    <path d="M128 142 l3.2 7 7 3.2 -7 3.2 -3.2 7 -3.2 -7 -7 -3.2 7 -3.2 z"/>
+    <path d="M147 132 l1.8 4 4 1.8 -4 1.8 -1.8 4 -1.8 -4 -4 -1.8 4 -1.8 z" fill-opacity="0.85"/>
+  </g>
+
+  <!-- anvil: smith — symmetric about x=128, rounded horn -->
+  <path fill="url(#anvil)" d="M72 163 Q72 157 79 155 L100 153 L180 153 Q186 153 186 159 L186 167 Q186 172 180 172 L138 172 L136 190 L158 190 L162 214 L146 214 L140 203 L116 203 L110 214 L94 214 L98 190 L120 190 L118 172 L100 172 Q82 171 72 163 Z"/>
+  <!-- under-face step shadow -->
+  <path d="M100 172 L186 172 L186 175 L100 175 Z" fill="#94a3b5" fill-opacity="0.55"/>
+  <!-- heat reflection along the working face -->
+  <path d="M102 154 L184 154" stroke="#ffcaa0" stroke-width="2" stroke-opacity="0.30" stroke-linecap="round"/>
 </svg>
