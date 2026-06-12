@@ -20,8 +20,9 @@ jobs:
       - name: Install ruff
         # Pinned for reproducible lint. An unpinned ruff makes CI
         # nondeterministic — a new release can flag pre-existing code on
-        # an unrelated PR. Bump this deliberately in its own PR.
-        run: pip install ruff==0.15.16
+        # an unrelated PR (0.15.16 did exactly that). Bump deliberately
+        # in its own PR, fixing whatever new rules it introduces.
+        run: pip install ruff==0.15.15
       - name: Lint
         run: ruff check src/ tests/
 
