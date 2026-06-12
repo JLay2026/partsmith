@@ -8,10 +8,17 @@ v0.2.6 (issue #8): partsmith_render_section.
 v0.2.7 (issue #3): partsmith_list_versions, partsmith_diff_designs.
                    save/load/delete tools accept optional version.
 v0.3.4 (issue #12): partsmith_render_drawing (dimensioned 2D drawing).
+v0.3.5 (issue #15): robust artifact delivery. Every file response now
+                   carries sha256 + size_bytes so a client can verify
+                   the bytes it materializes (catches silent truncation,
+                   e.g. a shell-heredoc write that got cut off), and
+                   exports always expose a fetchable url_path fallback,
+                   not just files over the inline cap.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 from pathlib import Path
 from typing import Optional, Union
@@ -34,29 +41,70 @@ INLINE_MAX_BYTES = int(
     os.environ.get("PARTSMITH_INLINE_MAX_BYTES", str(8 * 1024 * 1024))
 )
 
+# Extensions that GET /workspace/{filename} will actually serve (the
+# server's own allow-list). url_path is only advertised for these; render
+# PNGs live in the renders dir, are not persisted to the workspace, and
+# must travel inline.
+_FETCHABLE_EXTS = frozenset(("stl", "step", "3mf"))
+
+# Guidance attached to every inline payload. Read by the calling agent.
+_INTEGRITY_NOTE = (
+    "Verify before trusting: decode data_b64 to bytes, then assert "
+    "len(bytes) == size_bytes AND sha256(bytes) == sha256. Materialize "
+    "with a real binary write (e.g. base64 -d, or Python "
+    "open(path,'wb').write(...)). Do NOT paste via a shell heredoc / "
+    "echo -- long base64 truncates silently that way. On any mismatch, "
+    "call this tool again rather than keeping the partial file."
+)
+
 
 def _file_response(data: bytes, filename: str, content_type: str) -> dict:
+    """Build a file-delivery dict for an MCP tool result.
+
+    v0.3.5: always includes ``size_bytes`` + ``sha256`` so the caller can
+    verify whatever it writes to disk; always includes ``url_path`` for
+    workspace-servable exports (stl/step/3mf) as a transcription-free
+    fallback. Small files still inline ``data_b64`` by default for
+    back-compat; large files (> INLINE_MAX_BYTES) are url-only.
+    """
     size = len(data)
-    if size <= INLINE_MAX_BYTES:
-        return {
-            "filename": filename,
-            "content_type": content_type,
-            "size_bytes": size,
-            "inline": True,
-            "data_b64": base64.b64encode(data).decode("ascii"),
-        }
-    return {
+    sha256 = hashlib.sha256(data).hexdigest()
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    out: dict = {
         "filename": filename,
         "content_type": content_type,
         "size_bytes": size,
-        "inline": False,
-        "url_path": f"/workspace/{filename}",
-        "note": (
-            f"File ({size} bytes) exceeds the {INLINE_MAX_BYTES}-byte "
-            "inline cap. Fetch it via GET on the partsmith base URL + "
-            "url_path (same auth headers as this MCP call)."
-        ),
+        "sha256": sha256,
+        "inline": size <= INLINE_MAX_BYTES,
     }
+
+    # Fetchable fallback for anything the workspace endpoint can serve.
+    if ext in _FETCHABLE_EXTS:
+        out["url_path"] = f"/workspace/{filename}"
+
+    if out["inline"]:
+        out["data_b64"] = base64.b64encode(data).decode("ascii")
+        out["integrity_note"] = _INTEGRITY_NOTE
+    else:
+        note = (
+            f"File ({size} bytes) exceeds the {INLINE_MAX_BYTES}-byte "
+            "inline cap. "
+        )
+        if "url_path" in out:
+            note += (
+                "Fetch it via GET on the partsmith base URL + url_path "
+                "(same auth headers as this MCP call), then verify "
+                "sha256 + size_bytes."
+            )
+        else:
+            note += (
+                "This artifact is not workspace-servable; re-request with "
+                "a smaller output or a different format."
+            )
+        out["note"] = note
+
+    return out
 
 
 def build_mcp(
@@ -227,7 +275,22 @@ def build_mcp(
 
     @mcp.tool()
     def partsmith_export(name: str = "default", format: str = "stl") -> dict:
-        """Export a loaded model to STL, STEP, or 3MF."""
+        """Export a loaded model to STL, STEP, or 3MF.
+
+        Returns a file-delivery dict (v0.3.5):
+            filename, content_type, size_bytes, sha256, inline,
+            url_path (for stl/step/3mf), and data_b64 when inline.
+
+        IMPORTANT -- materialize safely: decode ``data_b64`` to bytes and
+        verify ``len == size_bytes`` and ``sha256`` matches before
+        trusting the file. Write the bytes with a real binary write
+        (``base64 -d``, or Python ``open(p,'wb').write(...)``). Do NOT
+        paste base64 through a shell heredoc / echo -- it truncates
+        silently for non-trivial files. If verification fails, just call
+        partsmith_export again (the server is the source of truth; never
+        keep a partial file). For larger exports, fetch ``url_path`` over
+        HTTP instead of transcribing inline.
+        """
         if format not in ("stl", "step", "3mf"):
             return {
                 "error": f"Unsupported format '{format}'. Use stl, step, or 3mf."
@@ -457,3 +520,4 @@ def build_mcp(
         return {"deleted": deleted, "name": name, "version": version}
 
     return mcp
+MCPEOF
