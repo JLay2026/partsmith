@@ -41,4 +41,4 @@ jobs:
         # tests/integration/* runs in integration.yml.
         # test_helpers + test_section + test_smoke need build123d at runtime;
         # they're covered by the integration suite (or future v0.3.2 expansion).
-        run: pytest tests/test_versioning.py -v --tb=short
+        run: pytest tests/test_versioning.py tests/test_bed_fit.py -v --tb=short
