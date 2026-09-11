@@ -19,6 +19,9 @@ v0.3.6 (issue #20): create/modify/load preview is now opt-in
                    downscaled + capped so it can never blow the client's
                    response token budget. Previously every create
                    embedded a full 800x600 iso PNG unconditionally.
+v0.3.7: build-volume fit in analyze_printability (bed_fit); save_design
+                   warns when the name carries its own version suffix
+                   (steers the caller toward same-name auto-versioning).
 """
 from __future__ import annotations
 
@@ -32,7 +35,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import __version__
 from .cad_engine import CADEngine
-from .design_store import DesignStore
+from .design_store import DesignStore, versioned_name_base
 from .printability import analyze as analyze_printability
 from .renderer import (
     render_2d,
@@ -182,6 +185,11 @@ def build_mcp(
 
         Models are in-memory only. Use partsmith_save_design to persist
         source code that survives container restart (versioned).
+
+        Naming: pick one stable name per part ("bracket", not
+        "bracket_v2") and keep re-using it as you iterate. The design
+        store versions automatically; encoding a version in the name
+        defeats that and breaks partsmith_diff_designs.
 
         Args:
             code: build123d source. Assign the final shape to ``result``.
@@ -366,13 +374,37 @@ def build_mcp(
     def partsmith_analyze_printability(
         name: str = "default",
         min_wall_thickness_mm: float = 0.8,
+        bed_mm: Optional[list[float]] = None,
     ) -> dict:
-        """Run a trimesh-based printability check on a loaded model."""
+        """Run a trimesh-based printability check on a loaded model.
+
+        Checks: watertight, closed volume, degenerate faces, smallest
+        bounding-box dimension vs ``min_wall_thickness_mm`` (a whole-
+        part thinness check, NOT local wall thickness), and -- v0.3.7 --
+        build-volume fit.
+
+        ``bed_fit`` in the result reports ``fits_as_oriented``,
+        ``fits_any_orientation`` (90-degree axis swaps), the
+        ``best_orientation`` dims, and per-axis ``overage_mm``. Run this
+        before exporting anything near the bed size; a part that fits in
+        no orientation is an ``issues`` entry and ``printable`` is False.
+
+        Args:
+            name: Model identifier (default "default").
+            min_wall_thickness_mm: Threshold for the thinness check.
+            bed_mm: [x, y, z] build volume override. Default comes from
+                ``PARTSMITH_BED_MM`` (server env) or the Bambu X1C
+                256 x 256 x 256.
+        """
         state, err = _need_shape(name)
         if err:
             return err
+        if bed_mm is not None and len(bed_mm) != 3:
+            return {"error": "bed_mm must be [x, y, z] in mm"}
         return analyze_printability(
-            state.shape, min_wall_thickness_mm=min_wall_thickness_mm
+            state.shape,
+            min_wall_thickness_mm=min_wall_thickness_mm,
+            bed_mm=bed_mm,
         )
 
     # -- v0.2.4 + v0.2.7: design store tools ----------------
@@ -389,6 +421,15 @@ def build_mcp(
         v0.2.7: designs are now versioned. The file layout is
         ``{workspace}/designs/{name}/v1.py``, ``v2.py``, ``v3.py``, etc.
         plus matching ``.json`` sidecars.
+
+        USE ONE NAME PER PART AND RE-SAVE IT. Iterating "bracket" ->
+        "bracket" -> "bracket" yields v1, v2, v3 and unlocks
+        partsmith_diff_designs / partsmith_list_versions. Iterating
+        "bracket_v1" -> "bracket_v2" -> "bracket_v3" creates three
+        unrelated designs each stuck at version 1 and nothing can be
+        diffed. v0.3.7: a name with a version suffix still saves, but
+        the response carries a ``warning`` naming the base you should
+        have used.
 
         Args:
             name: Design identifier (NAME_PATTERN-validated).
@@ -429,7 +470,7 @@ def build_mcp(
                 )
             }
 
-        return {
+        out = {
             "saved": True,
             "execution": {
                 "success": execution_result.get("success", False),
@@ -438,6 +479,23 @@ def build_mcp(
             },
             "metadata": metadata.to_dict(),
         }
+        base = versioned_name_base(name)
+        if base:
+            try:
+                base_versions = store.list_versions(base)
+            except ValueError:
+                base_versions = []
+            hint = (
+                f"'{name}' looks like a versioned name. Save iterations "
+                f"under '{base}' instead and let version=\"auto\" number "
+                "them; that enables partsmith_diff_designs."
+            )
+            if base_versions:
+                hint += (
+                    f" '{base}' already exists at versions {base_versions}."
+                )
+            out["warning"] = hint
+        return out
 
     @mcp.tool()
     def partsmith_load_design(
