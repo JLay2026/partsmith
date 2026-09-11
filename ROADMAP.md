@@ -4,10 +4,12 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-06-12 (post-v0.3.6 — Theme 2 substantially done
-(cross-section + fill/deltas + drawings); Theme 4 hardened delivery
-(v0.3.5 verifiable file responses, v0.3.6 opt-in capped preview).
-Renderer-swap spike #14 remains).
+**Last updated:** 2026-09-07 (post-v0.3.7 — first re-sequence driven
+by real usage. Three print projects Jun 22–Jul 6 (rug_hanger,
+vise_hanger v2–v8, mms_mount v3–v6) showed what actually hurts:
+bed-fit (shipped v0.3.7) and the Bambu 3MF handoff. Theme 3 moves
+ahead of #14; pre-slice time/material/overhang analysis drops to
+backlog for lack of demand.)
 
 ---
 
@@ -16,8 +18,8 @@ Renderer-swap spike #14 remains).
 | Theme | State |
 |---|---|
 | Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 backlog) |
-| Theme 2 — Output fidelity | 🟡 In progress (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; renderer swap remains) |
-| Theme 3 — Print workflow | ⬜ Not started |
+| Theme 2 — Output fidelity      | 🟡 Paused (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; #14 review renderer → v0.5.0) |
+| Theme 3 — Print workflow       | 🟡 In progress (bed-fit v0.3.7; 3MF metadata + keystone helper + cookbook → v0.4.0) |
 | Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
@@ -39,6 +41,11 @@ Renderer-swap spike #14 remains).
 - **Reuse the platform's native patterns.** ZimaOS provides Custom
   Install + x-casaos; we use it natively rather than inventing a
   parallel install flow.
+- **Audit the design store before planning.** The v0.3.7 re-sequence
+  came from `partsmith_list_designs` on the live box, not from the
+  issue tracker. It also revealed that every July iteration was saved
+  as a new name (`vise_hanger_v2`…`_v8`) so `diff_designs` never ran —
+  a tool-description problem, fixed in v0.3.7.
 - **Earn the feature with real demand.** New patterns (helpers,
   cookbook entries) get added when a real design has demanded them
   twice, not on speculation. See the cookbook (#4) deferral and the
@@ -58,7 +65,8 @@ blank-page + iteration pain.
 | [#1](https://github.com/JLay2026/partsmith/issues/1) | `partsmith_helpers` library (through_hole, screw_hole, hex_hole, slot, chamfer_edges, fillet_top_edges, screw_pattern) | ✅ Shipped v0.2.5 |
 | [#2](https://github.com/JLay2026/partsmith/issues/2) | Persistent design store — save/load build123d source to disk; survives container restart | ✅ Shipped v0.2.4 |
 | [#3](https://github.com/JLay2026/partsmith/issues/3) | Versioned designs + `partsmith_diff_designs(name, v1, v2)` | ✅ Shipped v0.2.7 |
-| [#4](https://github.com/JLay2026/partsmith/issues/4) | Cookbook — `examples/` dir with starter designs | ⬜ **Backlog** (no real-design demand yet; revisit after 3-4 more prints) |
+| [#4](https://github.com/JLay2026/partsmith/issues/4) | Cookbook — `examples/` dir with starter designs | 🟡 **Gate opened** — three real wall-mount/hanger designs exist; seed from them in v0.4.0 |
+| — | `keystone_slot(...)` helper (keyhole/keystone hanging slot) | ⬜ v0.4.0 — demanded by vise_hanger v6 + mms_mount; recurs across wall-mount parts |
 
 ---
 
@@ -76,7 +84,7 @@ swap remains, and it's a "may decline" spike.
 | [#8](https://github.com/JLay2026/partsmith/issues/8) | Cross-sections — `partsmith_render_section(name, plane, at)` | See internal cavities, wall thickness, snap-fit clearances | M | ✅ Shipped v0.2.6 |
 | [#13](https://github.com/JLay2026/partsmith/issues/13) | Cross-section fill + topology-complexity deltas | Solid material reads at a glance; richer version diffs | S-M | ✅ Shipped v0.3.3 |
 | [#12](https://github.com/JLay2026/partsmith/issues/12) | Dimensioned 2D engineering drawings — `partsmith_render_drawing(name, view)` | Visual confirmation the bracket is 50 mm wide BEFORE printing | M | ✅ Shipped v0.3.4 |
-| [#14](https://github.com/JLay2026/partsmith/issues/14) | VTK / trimesh-scene renderer swap | Photorealistic-ish previews where surface finish matters | M-L | ⬜ Spike — likely declined (bloats the slim container; see principle "small over capable") |
+| [#14](https://github.com/JLay2026/partsmith/issues/14) | Review-grade renderer (re-scoped: diagnostics JSON + contact sheet + legibility; engine swap behind a gate) | Review a part inline without a slicer round-trip | M | ⬜ v0.5.0 — after Theme 3 |
 | — | Drawing feature callouts (hole Ø, c-to-c spacing) | Per-feature dims, not just overall W/H | M | ⬜ Deferred from v0.3.4 (needs reliable mesh circle detection; earn with real demand) |
 | — | Multi-color preview — indicate AMS slot per face/body | Once you're using all 4 AMS slots for a part | L | ⬜ No issue yet |
 
@@ -85,19 +93,23 @@ when starting the renderer swap or feature callouts.
 
 ---
 
-## Theme 3 — Print workflow integration (closes the loop to the X1C) ⬜
+## Theme 3 — Print workflow integration (closes the loop to the X1C) 🟡
 
 partsmith's job ends at the STL. Shrink the gap between "STL exists"
-and "X1C is printing it."
+and "X1C is printing it." **Re-scoped 2026-09-07 from the July prints:**
+the two things that actually cost iterations were bed size
+(vise_hanger v4 → v4.1 existed only to shrink 260 → 250 mm) and the
+Bambu Studio handoff. Time/material/overhang estimates did not.
 
-| Item | What it gives you | Effort |
-|---|---|---|
-| 3MF with Bambu metadata (orientation, supports, AMS slot per body) | One fewer click in Bambu Studio per part | M |
-| Pre-slicing analysis — estimated print time, material usage, overhang map, bed adhesion area, COM tipping risk | Catch "this needs supports + tree" before you slice | L |
-| Optional: Bambu Connect / MQTT integration | Skip Bambu Studio for repeat prints | XL (out-of-tree candidate) |
+| Item | What it gives you | Effort | Status |
+| --- | --- | --- | --- |
+| Build-volume fit check (`PARTSMITH_BED_MM`, per-call `bed_mm`) | Catch "doesn't fit the bed" at v2, not at the slicer | S | ✅ Shipped v0.3.7 |
+| 3MF with Bambu metadata (orientation, supports, AMS slot per body) | One fewer click in Bambu Studio per part | M | ⬜ v0.4.0 (file an issue first) |
+| Pre-slicing analysis — print time, material, overhang map, COM tipping risk | Catch "needs supports" before you slice | L | ⬜ Backlog — no demand observed |
+| Optional: Bambu Connect / MQTT integration | Skip Bambu Studio for repeat prints | XL (out-of-tree candidate) | ⬜ v0.6+ / out-of-tree |
 
-**Target release:** v0.5.0 (core); Bambu Connect deferred to v0.6+ or
-out-of-tree plugin.
+**Target release:** v0.4.0 (3MF metadata + keystone helper + cookbook);
+Bambu Connect deferred to v0.6+ or out-of-tree plugin.
 
 ---
 
@@ -166,11 +178,15 @@ v0.3.3  ✅ Theme 2 #13 — cross-section fill + topology deltas
 v0.3.4  ✅ Theme 2 #12 — dimensioned drawings
 v0.3.5  ✅ Theme 4 #18 — robust artifact delivery (sha256 + url_path on file responses)
 v0.3.6  ✅ Theme 4 #20 — opt-in, capped create preview
+v0.3.7  ✅ Theme 3     — bed-fit check; versioned-name warning; README drift
 ---- you are here ----
-v0.3.x  — Theme 2 #14 renderer-swap spike (likely declined) or feature callouts
-v0.5.0  — Theme 3 (3MF metadata, pre-slicing analysis)
-v0.6+   — Theme 3 cont. (Bambu Connect) or whatever real workloads surface
-backlog — #4 cookbook (after more real prints); nut/ retrofit
+v0.4.0  — Theme 3: Bambu 3MF metadata; keystone_slot helper; #4 cookbook
+          seeded from rug_hanger / vise_hanger / mms_mount
+v0.5.0  — Theme 2 #14 review-grade renderer (diagnostics JSON, contact
+          sheet, matplotlib legibility; PyVista gate intact)
+v0.6+   — Bambu Connect or whatever real workloads surface
+backlog — pre-slice time/material/overhang analysis; drawing feature
+          callouts; nut/ retrofit
 v1.0    — when partsmith has been used in earnest for 6 months and
           no longer surfaces sharp edges
 ```

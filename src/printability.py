@@ -1,23 +1,41 @@
 # SPDX-FileCopyrightText: 2026 JLay2026
 # SPDX-License-Identifier: MIT
-"""Trimesh-based printability check: manifold/watertight + sanity bounds."""
+"""Trimesh-based printability check: manifold/watertight + sanity bounds.
+
+v0.3.7: build-volume fit check (``bed_fit``), see ``src/bed_fit.py``.
+"""
 
 from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any
+from typing import Any, Optional, Sequence
 
 import numpy as np
 import trimesh
 
+from .bed_fit import check_bed_fit
 
-def analyze(shape: Any, min_wall_thickness_mm: float = 0.8) -> dict:
+
+def analyze(
+    shape: Any,
+    min_wall_thickness_mm: float = 0.8,
+    bed_mm: Optional[Sequence[float]] = None,
+) -> dict:
     """
     Run a quick printability check on a build123d Shape.
 
     Returns a dict with watertight/volume/euler/face/volume/area
     fields, plus an `issues` list and `printable` boolean.
+
+    ``min_wall_thickness_mm`` is compared against the smallest
+    bounding-box dimension, not against true local wall thickness --
+    it catches a part that is thin overall, not a thin wall on a thick
+    part.
+
+    v0.3.7: ``bed_mm`` (x, y, z) overrides the ``PARTSMITH_BED_MM``
+    env / X1C default for the build-volume fit check. A part that fits
+    in no 90-degree orientation is reported as an issue.
     """
     from build123d import export_stl
 
@@ -52,6 +70,22 @@ def analyze(shape: Any, min_wall_thickness_mm: float = 0.8) -> dict:
             f"Smallest bounding-box dimension ({min_dim:.2f} mm) is below the "
             f"min wall thickness threshold ({min_wall_thickness_mm} mm)."
         )
+    fit = check_bed_fit(dims, bed_mm=bed_mm)
+    if not fit["fits_any_orientation"]:
+        over = ", ".join(
+            f"{axis}+{o:.1f}" for axis, o in zip("XYZ", fit["overage_mm"]) if o > 0
+        )
+        issues.append(
+            f"Part ({dims[0]:.1f} x {dims[1]:.1f} x {dims[2]:.1f} mm) exceeds "
+            f"the build volume {fit['bed_mm']} in every 90-degree orientation "
+            f"(over by {over} mm as oriented)."
+        )
+    elif not fit["fits_as_oriented"]:
+        # Advisory, not a defect: the slicer can rotate it.
+        fit["note"] = (
+            "Exceeds the build volume as oriented but fits if rotated to "
+            f"{fit['best_orientation']} mm (x, y, z)."
+        )
     if hasattr(mesh, "face_normals"):
         degenerate = int(np.sum(np.isnan(mesh.face_normals).any(axis=1)))
         if degenerate > 0:
@@ -67,6 +101,7 @@ def analyze(shape: Any, min_wall_thickness_mm: float = 0.8) -> dict:
         "bounding_box_mm": [round(d, 3) for d in dims],
         "min_dim_mm": round(min_dim, 3),
         "min_wall_thickness_mm": min_wall_thickness_mm,
+        "bed_fit": fit,
         "issues": issues,
         "printable": len(issues) == 0,
     }

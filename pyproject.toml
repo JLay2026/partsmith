@@ -1,6 +1,6 @@
 [project]
 name = "partsmith"
-version = "0.3.6"
+version = "0.3.7"
 description = "Minimal headless parametric-CAD server (build123d + REST + MCP)"
 license = { text = "MIT" }
 authors = [
@@ -27,7 +27,9 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
     "pydantic>=2.0.0",
-    "mcp>=1.0.0",
+    # mcp 2.x renamed FastMCP -> MCPServer and changed transport APIs.
+    # Pinned <2 until a deliberate migration (see ROADMAP backlog).
+    "mcp>=1.0.0,<2",
 ]
 
 [project.optional-dependencies]
