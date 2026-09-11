@@ -332,3 +332,26 @@ def test_save_request_schema_accepts_version(tmp_path: Path):
     assert req.version == "auto"
     req2 = SaveDesignRequest(code="x", name="ok", version=3)
     assert req2.version == 3
+
+
+# ── v0.3.7: versioned-name detection ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "name,base",
+    [
+        ("vise_hanger_v2", "vise_hanger"),
+        ("vise_hanger_v4_1", "vise_hanger"),
+        ("mms_mount_V6", "mms_mount"),
+        ("bracket-v3", "bracket"),
+        ("bracket", None),
+        ("v4", None),
+        ("bracket_v", None),
+        ("rev2_bracket", None),
+    ],
+)
+def test_versioned_name_base(name, base):
+    """Names that carry their own version suffix are detected (v0.3.7)."""
+    from src.design_store import versioned_name_base
+
+    assert versioned_name_base(name) == base
