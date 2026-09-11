@@ -25,8 +25,9 @@ no authentication itself — the perimeter is the security boundary (see
 - **See inside** designs: 3D shaded views, 2D orthographic projections
   with dimensions, multiview composites, and **cross-sections** through
   any plane — all returned as inline PNGs without leaving the chat.
-- **Validate** printability: watertight / manifold / wall-thickness
-  checks before you ever open a slicer.
+- **Validate** printability: watertight / manifold / minimum-dimension
+  checks, plus a **build-volume fit check** against your printer's bed
+  (v0.3.7), before you ever open a slicer.
 - **Persist + version** designs to disk: every save is a new version,
   with a `diff` that reports source changes + geometry deltas (volume,
   surface area, bounding box) between any two versions.
@@ -65,10 +66,10 @@ docker run -d --name partsmith \
   ghcr.io/jlay2026/partsmith:latest
 
 curl http://127.0.0.1:8123/health
-# {"status":"ok","version":"0.3.1"}
+# {"status":"ok","version":"0.3.7"}
 ```
 
-Pin a specific version with `:0.3.1` instead of `:latest`. Available
+Pin a specific version with `:0.3.7` instead of `:latest`. Available
 tags: <https://github.com/JLay2026/partsmith/pkgs/container/partsmith>.
 
 ### Option C — local dev (build from source)
@@ -97,8 +98,14 @@ directly — no shim process.
 | Transport | `streamable-http` |
 | Auth | Whatever your reverse proxy enforces (send headers via the client's Headers field) |
 
-On connect, the client sees the full `partsmith_*` tool surface (17
-tools as of v0.3.1).
+On connect, the client sees the full `partsmith_*` tool surface (18
+tools as of v0.3.7).
+
+**Naming tip for agents:** use one stable name per part and re-save it
+as you iterate (`bracket` → `bracket` → `bracket`), not
+`bracket_v1` → `bracket_v2`. The design store versions automatically,
+and only same-name versions can be diffed. Since v0.3.7, saving a
+version-suffixed name returns a `warning` pointing at the base name.
 
 ## build123d helpers
 
@@ -160,9 +167,10 @@ designs/bracket/
 | `/render/2d` | POST | 2D orthographic view + optional dimensions | v0.1 |
 | `/render/multiview` | POST | Composite: front + right + top + iso | v0.1 |
 | `/render/section` | POST | **2D cross-section** on XY/XZ/YZ at an offset | v0.2.6 |
+| `/render/drawing` | POST | Dimensioned engineering drawing (overall W/H + title block) | v0.3.4 |
 | `/render/all` | POST | Render every standard view to disk | v0.1 |
 | `/export` | POST | Export STL / STEP / 3MF as binary | v0.1 |
-| `/analyze/printability` | POST | Watertight / manifold / wall-thickness check | v0.1 |
+| `/analyze/printability` | POST | Watertight / manifold / min-dimension + bed-fit check (`bed_mm` override) | v0.1 (bed-fit v0.3.7) |
 | `/workspace/{filename}` | GET | Stream a previously-exported file (MCP large-file fallback) | v0.2 |
 | `/design/save` | POST | Save a design version (also executes as a model) | v0.2.4 |
 | `/design/list` | GET | List saved designs (latest of each) | v0.2.4 |
@@ -187,8 +195,9 @@ All prefixed `partsmith_` to avoid collisions in multi-server setups.
 | `partsmith_render_2d` | 2D orthographic projection | v0.2 |
 | `partsmith_render_multiview` | 2×2 composite | v0.2 |
 | `partsmith_render_section` | **Cross-section** through a plane | v0.2.6 |
+| `partsmith_render_drawing` | Dimensioned engineering drawing + title block | v0.3.4 |
 | `partsmith_export` | Export STL / STEP / 3MF | v0.2 |
-| `partsmith_analyze_printability` | Watertight / manifold / wall check | v0.2 |
+| `partsmith_analyze_printability` | Watertight / manifold / min-dimension + **bed-fit** check | v0.2 (bed-fit v0.3.7) |
 | `partsmith_save_design` | Save a design version | v0.2.4 |
 | `partsmith_load_design` | Load + execute a saved design | v0.2.4 |
 | `partsmith_list_designs` | List saved designs | v0.2.4 |
@@ -219,6 +228,7 @@ with the same auth headers.
 | `PARTSMITH_PORT` | `8123` | Server bind port |
 | `PARTSMITH_MAX_BODY_BYTES` | `1048576` (1 MiB) | Reject REST requests larger than this. `/mcp` is exempt. |
 | `PARTSMITH_INLINE_MAX_BYTES` | `8388608` (8 MiB) | MCP file payloads above this return a `url_path` instead of inlining. |
+| `PARTSMITH_BED_MM` | `256,256,256` (Bambu X1C) | Build volume `x,y,z` in mm for the printability bed-fit check. Per-call `bed_mm` overrides it. |
 
 ## Operational notes
 
