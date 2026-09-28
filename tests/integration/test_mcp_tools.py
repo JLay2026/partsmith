@@ -326,3 +326,126 @@ def test_render_drawing_via_mcp(partsmith_url):
     assert result.get("inline") is True, f"Expected inline PNG, got {result!r}"
     png = base64.b64decode(result["data_b64"])
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "drawing render is not a PNG"
+
+
+def _create(partsmith_url, code, name, req_id):
+    r = _rpc(
+        partsmith_url,
+        "tools/call",
+        {"name": "partsmith_create_model", "arguments": {"code": code, "name": name}},
+        req_id=req_id,
+    )
+    assert r.status_code == 200, f"create_model returned {r.status_code}: {r.text[:300]}"
+    assert _tool_result_dict(r.json()).get("success") is True
+
+
+def test_bed_fit_via_mcp(partsmith_url):
+    """v0.3.7: analyze_printability flags a 260 mm part on the 256 mm X1C
+    default bed and passes the 250 mm fix (the real vise_hanger v4 -> v4.1
+    story)."""
+    init = _initialize(partsmith_url)
+    assert init.status_code == 200
+
+    _create(
+        partsmith_url,
+        "from build123d import *\nresult = Box(260, 94, 168)",
+        "ci-bedfit-wide",
+        req_id=2,
+    )
+    _create(
+        partsmith_url,
+        "from build123d import *\nresult = Box(250, 94, 168)",
+        "ci-bedfit-ok",
+        req_id=3,
+    )
+
+    wide = _tool_result_dict(
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {
+                "name": "partsmith_analyze_printability",
+                "arguments": {"name": "ci-bedfit-wide"},
+            },
+            req_id=4,
+        ).json()
+    )
+    fit = wide.get("bed_fit")
+    assert fit is not None, f"no bed_fit in result: {wide!r}"
+    assert fit["bed_mm"] == [256.0, 256.0, 256.0]
+    assert fit["fits_any_orientation"] is False
+    assert wide["printable"] is False
+    assert any("build volume" in i for i in wide["issues"]), wide["issues"]
+
+    ok = _tool_result_dict(
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {
+                "name": "partsmith_analyze_printability",
+                "arguments": {"name": "ci-bedfit-ok"},
+            },
+            req_id=5,
+        ).json()
+    )
+    assert ok["bed_fit"]["fits_as_oriented"] is True
+    assert not any("build volume" in i for i in ok["issues"]), ok["issues"]
+
+    # Explicit override: the wide part fits a hypothetical 300 mm bed.
+    big = _tool_result_dict(
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {
+                "name": "partsmith_analyze_printability",
+                "arguments": {"name": "ci-bedfit-wide", "bed_mm": [300, 300, 300]},
+            },
+            req_id=6,
+        ).json()
+    )
+    assert big["bed_fit"]["fits_as_oriented"] is True
+
+
+def test_save_design_versioned_name_warning(partsmith_url):
+    """v0.3.7: saving 'foo_v2' succeeds but returns a warning that names the
+    base design; a plain name returns no warning."""
+    init = _initialize(partsmith_url)
+    assert init.status_code == 200
+    code = "from build123d import *\nresult = Box(10, 10, 10)"
+
+    plain = _tool_result_dict(
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {
+                "name": "partsmith_save_design",
+                "arguments": {"name": "ci-warn-base", "code": code},
+            },
+            req_id=2,
+        ).json()
+    )
+    assert plain.get("saved") is True, plain
+    assert "warning" not in plain
+
+    suffixed = _tool_result_dict(
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {
+                "name": "partsmith_save_design",
+                "arguments": {"name": "ci-warn-base_v2", "code": code},
+            },
+            req_id=3,
+        ).json()
+    )
+    assert suffixed.get("saved") is True, suffixed
+    assert "ci-warn-base" in suffixed.get("warning", ""), suffixed
+
+    # Clean up so re-runs against a persistent workspace stay deterministic.
+    for n in ("ci-warn-base", "ci-warn-base_v2"):
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {"name": "partsmith_delete_design", "arguments": {"name": n}},
+            req_id=4,
+        )

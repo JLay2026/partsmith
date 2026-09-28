@@ -4,6 +4,57 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.3.7] — 2026-09-07
+
+First release after the July prints (rug_hanger, vise_hanger v2–v8,
+mms_mount v3–v6). Two items came straight from that usage.
+
+### Added
+- **Build-volume fit check** (`src/bed_fit.py`, wired into
+  `printability.analyze`). `analyze_printability` (MCP + REST) now
+  returns a `bed_fit` block: `bed_mm`, `fits_as_oriented`,
+  `fits_any_orientation` (90° axis permutations), `best_orientation`,
+  `overage_mm`. A part that fits in no orientation is an `issues` entry
+  and `printable` is `False`; a part that only fits rotated gets an
+  advisory `bed_fit.note` and stays printable. Bed comes from new env
+  `PARTSMITH_BED_MM` (default `256,256,256`, Bambu X1C) or a per-call
+  `bed_mm` override. First Theme 3 item.
+- **Versioned-name warning on `partsmith_save_design`.** Saving a name
+  like `bracket_v4` / `bracket-v4_1` still succeeds but returns a
+  `warning` naming the base (`bracket`) and, if it exists, its versions.
+  New `design_store.versioned_name_base()` helper.
+- Tests: `tests/test_bed_fit.py` (stdlib, runs in the lightweight CI
+  job — `ci.yml` now runs it), `test_versioned_name_base` in
+  `test_versioning.py`, and two integration tests
+  (`test_bed_fit_via_mcp`, `test_save_design_versioned_name_warning`).
+
+### Changed
+- `partsmith_create_model` / `partsmith_save_design` docstrings now tell
+  the calling agent to use one stable name per part and let
+  `version="auto"` number iterations.
+- README: tool count/version drift fixed (18 tools, v0.3.7),
+  `partsmith_render_drawing` + `POST /render/drawing` were missing from
+  the tables, and "wall-thickness check" reworded — the existing check
+  compares the smallest *bounding-box* dimension, not local wall
+  thickness. `PARTSMITH_BED_MM` documented.
+- ROADMAP re-sequenced from real usage (see file).
+
+### Why
+`vise_hanger_v4` was authored at 260 mm, exported, and rejected by the
+slicer for the 256 mm bed; `v4_1` exists solely to fix that. The check
+costs ~60 LOC and would have caught it at v2.
+
+Every July iteration series was saved as a new design *name* at
+version 1 (`vise_hanger_v2` … `vise_hanger_v8`), so the v0.2.7
+versioning + `diff_designs` never ran against a real loop. The client
+was never told not to do that. Warn-not-reject: same-name might
+occasionally be intentional.
+
+### Commit
+See [`HEAD`](https://github.com/JLay2026/partsmith/commits/main).
+
+---
+
 ## [0.3.6] — 2026-06-12
 
 ### Changed

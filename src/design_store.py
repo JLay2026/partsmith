@@ -56,6 +56,23 @@ _NAME_RE = re.compile(NAME_PATTERN)
 # match this pattern.
 _VERSION_STEM_RE = re.compile(r"^v(\d+)$")
 
+# v0.3.7: design names that carry their own version suffix
+# ("bracket_v4", "bracket_v4_1"). Every July-2026 iteration series was
+# saved this way, which bypasses the versioned store entirely (each
+# name sat at version 1, so diff_designs never ran). Detected so the
+# save tool can steer the caller back to same-name auto-versioning.
+_VERSIONED_NAME_RE = re.compile(r"^(?P<base>.+?)[_-]v\d+(?:[_-]\d+)?$", re.IGNORECASE)
+
+
+def versioned_name_base(name: str) -> Optional[str]:
+    """Return the base name if ``name`` ends in a version suffix, else None.
+
+    ``"bracket_v4" -> "bracket"``, ``"bracket-v4_1" -> "bracket"``,
+    ``"v4" -> None``, ``"bracket" -> None``.
+    """
+    m = _VERSIONED_NAME_RE.match(name)
+    return m.group("base") if m else None
+
 
 @dataclass
 class DesignMetadata:

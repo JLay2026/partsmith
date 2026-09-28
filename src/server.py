@@ -208,6 +208,8 @@ class ExportRequest(BaseModel):
 class PrintabilityRequest(BaseModel):
     name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
     min_wall_thickness: float = Field(0.8, ge=0.0, le=100.0)
+    # v0.3.7: optional [x, y, z] build-volume override (mm).
+    bed_mm: Optional[list[float]] = Field(None, min_length=3, max_length=3)
 
 
 class SaveDesignRequest(BaseModel):
@@ -408,7 +410,11 @@ def analyze_printability_endpoint(req: PrintabilityRequest):
     state = engine.get(req.name)
     if not state or not state.shape:
         raise HTTPException(404, f"No model '{req.name or 'active'}' found")
-    return analyze_printability(state.shape, min_wall_thickness_mm=req.min_wall_thickness)
+    return analyze_printability(
+        state.shape,
+        min_wall_thickness_mm=req.min_wall_thickness,
+        bed_mm=req.bed_mm,
+    )
 
 
 # ── v0.2: workspace file serving ────
