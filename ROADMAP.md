@@ -20,7 +20,7 @@ of #14; pre-slice time/material/overhang analysis stays in backlog.)
 |---|---|
 | Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 backlog) |
 | Theme 2 — Output fidelity      | 🟡 Paused (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; #14 review renderer → v0.5.0) |
-| Theme 3 — Print workflow       | 🟡 In progress (bed-fit + assembly fit check merged; multi-body Bambu 3MF + cookbook → v0.4.0) |
+| Theme 3 — Print workflow       | 🟡 In progress (bed-fit, assembly fit check, multi-part plate 3MF built; cookbook → v0.4.0) |
 | Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6; locked deps + REST parity tests v0.4.0) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
@@ -114,7 +114,7 @@ parts and exporting several bodies per plate are earned.
 | --- | --- | --- | --- |
 | Build-volume fit check (`PARTSMITH_BED_MM`, per-call `bed_mm`) | Catch "doesn't fit the bed" at v2, not at the slicer | S | ✅ Merged (ships in v0.4.0) |
 | [#25](https://github.com/JLay2026/partsmith/issues/25) Assembly clearance / interference check between two models | Catch "the M3 hole misses the boss" before printing both parts | M | ✅ Merged (ships in v0.4.0) |
-| [#26](https://github.com/JLay2026/partsmith/issues/26) 3MF with Bambu metadata — multiple bodies per plate, filament/AMS slot per body | One fewer click in Bambu Studio per part; whole assemblies on one plate | M | ⬜ v0.4.0 — design pending approval |
+| [#26](https://github.com/JLay2026/partsmith/issues/26) 3MF with Bambu metadata — multiple bodies per plate, filament/AMS slot per body | One fewer click in Bambu Studio per part; whole assemblies on one plate | M | ✅ Built (ships in v0.4.0) — plain multi-part 3MF, arrange default + `as_modeled`; vendor settings and filament hints dropped |
 | Pre-slicing analysis — print time, material, overhang map, COM tipping risk | Catch "needs supports" before you slice | L | ⬜ Backlog — no demand observed |
 | Optional: Bambu Connect / MQTT integration | Skip Bambu Studio for repeat prints | XL (out-of-tree candidate) | ⬜ v0.6+ / out-of-tree |
 
@@ -194,9 +194,10 @@ v0.3.7  ⏭️ never tagged — folded into v0.4.0
 ---- you are here ----
 v0.4.0  — merged: bed-fit check; versioned-name warning (REST + MCP);
           mcp<2 pin; locked constraints.txt; README/doc drift;
-          #25 assembly fit check; partsmith_get_design (parity)
-          to build: #26 multi-body Bambu 3MF; #4 cookbook seeded from
-          real designs (keystone helper #27 dropped)
+          #25 assembly fit check; partsmith_get_design (parity);
+          #26 multi-part plate 3MF (+ 3MF-was-STL fix)
+          to build: #4 cookbook seeded from real designs
+          (keystone helper #27 dropped)
 v0.5.0  — Theme 2 #14 review-grade renderer (diagnostics JSON, contact
           sheet, matplotlib legibility; PyVista gate intact)
 v0.6+   — Bambu Connect or whatever real workloads surface

@@ -29,6 +29,19 @@ def test_overlap_reports_volume_and_region():
     assert "overlap" in r["issues"][0]
 
 
+def test_part_fully_inside_another_interferes():
+    """Containment: the distance solver reports boundary-to-boundary
+    distance (> 0) here, so the boolean must still run."""
+    from src.fit_check import check_fit
+
+    for a, b in ((_box(40, 40, 40), _box(10, 10, 10)), (_box(10, 10, 10), _box(40, 40, 40))):
+        r = check_fit(a, b)
+        assert r["interferes"] is True
+        assert r["interference_volume_mm3"] == pytest.approx(1000.0, abs=0.01)
+        assert r["min_distance_mm"] == 0.0
+        assert r["ok"] is False
+
+
 def test_touching_is_contact_not_interference():
     from src.fit_check import check_fit
 

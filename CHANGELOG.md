@@ -8,10 +8,24 @@ this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
 Folds in the never-tagged 0.3.7 work (merged in #24) plus release
 hardening (#28), then Theme 3 features. Still to land before the tag:
-multi-body Bambu 3MF (#26) and the cookbook (#4). The keystone helper
-(#27) was dropped for lack of a second real use.
+the cookbook (#4). The keystone helper (#27) was dropped for lack of a
+second real use.
 
 ### Added
+- **Multi-part plate export** (#26) — `partsmith_export_plate` (MCP) +
+  `POST /export/plate` (REST), in new `src/plate_export.py`. Writes
+  1–16 loaded models as one standard 3MF, one named object per model;
+  Bambu Studio, OrcaSlicer and PrusaSlicer import them as separate
+  objects on one plate. Default `layout="arrange"` drops each part to
+  the bed and lays them out side by side in the given order (`gap_mm`,
+  default 5), wrapping rows and centering on the bed; parts are never
+  rotated. `layout="as_modeled"` keeps modeled positions as one rigid
+  group and is rejected if any two parts overlap (mating parts are
+  usually modeled in assembly positions, where they can't print).
+  Anything that doesn't fit the bed (`PARTSMITH_BED_MM` or `bed_mm`) is
+  an error that says to split across plates or rotate the part.
+  Deliberately no slicer-vendor project settings and no filament hints
+  (decided on #26).
 - **Assembly fit check** (#25) — `partsmith_check_fit` (MCP) +
   `POST /analyze/fit` (REST), in new `src/fit_check.py`. Reports
   whether two models overlap (volume + the region where they do),
@@ -55,6 +69,14 @@ multi-body Bambu 3MF (#26) and the cookbook (#4). The keystone helper
   (REST warning + REST `bed_mm` validation).
 
 ### Fixed
+- **`format="3mf"` exports were STL.** Since v0.1 the 3MF branch of
+  export silently wrote STL bytes under a `.3mf` name. It now writes a
+  real 3MF (build123d `Mesher`), with the model name on the object.
+- **Fit check missed a part fully inside another** (#25). The distance
+  solver reports the gap between the two boundaries in that case, so
+  the overlap boolean never ran and `check_fit` said "no
+  interference". The boolean now also runs whenever the bounding boxes
+  overlap. Found while building the plate export's overlap check.
 - **Fresh image builds failed on mcp 2.x.** `pyproject.toml` allowed
   `mcp>=1.0.0`; mcp 2.x renamed `FastMCP` to `MCPServer`, so any image
   built after its release crashed on import. Pinned `mcp>=1.0.0,<2`;
@@ -93,7 +115,7 @@ only be checked alone, so a hole that missed its boss was found after
 printing both.
 
 ### Verification
-Locked set installed on CPython 3.11: 50 unit tests (including the
+Locked set installed on CPython 3.11: 66 unit tests (including the
 build123d-dependent ones CI skips) and the full integration suite
 against a live server pass.
 

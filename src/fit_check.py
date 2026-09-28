@@ -67,14 +67,18 @@ def check_fit(
 
     volume = 0.0
     overlap_bbox = None
-    if dist <= _DISTANCE_EPS_MM:
-        # Touching or overlapping: only a boolean tells them apart.
+    if dist <= _DISTANCE_EPS_MM or _boxes_overlap(shape_a, shape_b):
+        # Touching or overlapping: only a boolean tells them apart. The
+        # bbox test also catches full containment, where the distance
+        # solver reports the gap between the two boundaries instead of 0.
         common = shape_a & shape_b
         volume = float(getattr(common, "volume", 0.0) or 0.0)
         if volume > _VOLUME_EPS_MM3:
             overlap_bbox = _bbox_dict(common)
 
     interferes = volume > _VOLUME_EPS_MM3
+    if interferes:
+        dist = 0.0
     contact = dist <= _DISTANCE_EPS_MM and not interferes
     ok = (not interferes) and dist + _DISTANCE_EPS_MM >= min_clearance_mm
 
@@ -105,6 +109,15 @@ def check_fit(
         "ok": ok,
         "issues": issues,
     }
+
+
+def _boxes_overlap(shape_a: Any, shape_b: Any) -> bool:
+    a, b = shape_a.bounding_box(), shape_b.bounding_box()
+    return (
+        a.min.X < b.max.X and b.min.X < a.max.X
+        and a.min.Y < b.max.Y and b.min.Y < a.max.Y
+        and a.min.Z < b.max.Z and b.min.Z < a.max.Z
+    )
 
 
 def _pt(v: Any) -> list[float]:

@@ -63,11 +63,17 @@ v0.4.0 (issue #25):
 - Assembly fit check. `fit_check.check_fit()` + POST /analyze/fit +
   partsmith_check_fit MCP tool: interference + clearance between two
   models.
+
+v0.4.0 (issue #26):
+- Plate export. POST /export/plate + partsmith_export_plate: several
+  models in one standard 3MF, laid out side by side (or as modeled).
+  Also fixes `format="3mf"` exports, which silently wrote STL since v0.1.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 from contextlib import asynccontextmanager
@@ -209,6 +215,18 @@ class DrawingRequest(BaseModel):
 class ExportRequest(BaseModel):
     name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
     format: str = Field("stl", pattern=r"^(stl|step|3mf)$")
+
+
+class PlateExportRequest(BaseModel):
+    """v0.4.0 (#26): several models in one standard 3MF plate."""
+    names: list[Annotated[str, Field(pattern=NAME_PATTERN, max_length=64)]] = Field(
+        ..., min_length=1, max_length=16,
+    )
+    layout: str = Field("arrange", pattern=r"^(arrange|as_modeled)$")
+    gap_mm: float = Field(5.0, ge=0.0, le=100.0)
+    bed_mm: Optional[list[Annotated[float, Field(gt=0.0, le=10000.0)]]] = Field(
+        None, min_length=3, max_length=3,
+    )
 
 
 class PrintabilityRequest(BaseModel):
@@ -418,6 +436,32 @@ def export_model(req: ExportRequest):
         path,
         filename=path.name,
         media_type="application/octet-stream",
+    )
+
+
+@app.post("/export/plate")
+def export_plate_endpoint(req: PlateExportRequest):
+    """v0.4.0 (#26): several models as one standard 3MF plate (binary).
+
+    Placement details travel in the ``X-Partsmith-Plate`` header (JSON).
+    """
+    try:
+        path, info = engine.export_plate(
+            req.names, bed_mm=req.bed_mm, layout=req.layout, gap_mm=req.gap_mm,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(
+            500,
+            f"Export write failed: {e}. "
+            f"Check that {engine.workspace} is writable by uid 1000.",
+        )
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="model/3mf",
+        headers={"X-Partsmith-Plate": json.dumps(info, separators=(",", ":"))},
     )
 
 

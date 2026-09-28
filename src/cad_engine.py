@@ -259,13 +259,53 @@ class CADEngine:
             from build123d import export_step
             export_step(state.shape, str(path))
         elif format == "3mf":
-            try:
-                from build123d import export_3mf  # type: ignore
-                export_3mf(state.shape, str(path))
-            except ImportError:
-                from build123d import export_stl
-                path = path.with_suffix(".stl")
-                export_stl(state.shape, str(path))
+            # v0.4.0 fix: build123d has no export_3mf, so the old
+            # ImportError fallback silently wrote an STL for every 3MF
+            # request. Mesher writes a real 3MF.
+            from .plate_export import write_3mf
+            write_3mf([(safe_name, state.shape, (0.0, 0.0, 0.0))], path)
         else:
             raise ValueError(f"Unsupported format: {format}")
         return path
+
+    def export_plate(
+        self,
+        names: list[str],
+        bed_mm: Optional[list[float]] = None,
+        layout: str = "arrange",
+        gap_mm: float = 5.0,
+    ) -> tuple[Path, dict]:
+        """v0.4.0 (#26): several loaded models as one standard 3MF plate.
+
+        ``layout="arrange"`` (default) lays parts out side by side on the
+        bed; ``"as_modeled"`` keeps modeled positions as one rigid group.
+        See plate_export for details. Raises ValueError if a model is
+        missing, names repeat, or the parts can't be placed on the bed.
+        Returns (path, placement info).
+        """
+        from .plate_export import plan_plate, plate_filename, write_3mf
+
+        if not names:
+            raise ValueError("names must list at least one model")
+        if len(names) > 16:
+            raise ValueError("at most 16 models per plate")
+        if len(set(names)) != len(names):
+            raise ValueError("names must not repeat")
+        parts = []
+        for n in names:
+            state = self.get(n)
+            if state is None or state.shape is None:
+                raise ValueError(f"No model '{n}' available")
+            if Path(state.name).name != state.name:
+                raise ValueError(f"Unsafe model name: {state.name!r}")
+            parts.append((state.name, state.shape))
+
+        info = plan_plate(parts, bed_mm=bed_mm, layout=layout, gap_mm=gap_mm)
+        path = self.workspace / plate_filename([n for n, _ in parts])
+        try:
+            path.resolve().relative_to(self.workspace.resolve())
+        except ValueError:
+            raise ValueError(f"Export path escapes workspace: {path}")
+        offsets = [p["offset_mm"] for p in info["placements"]]
+        write_3mf([(n, s, o) for (n, s), o in zip(parts, offsets)], path)
+        return path, info
