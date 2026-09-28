@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Trimesh-based printability check: manifold/watertight + sanity bounds.
 
-v0.3.7: build-volume fit check (``bed_fit``), see ``src/bed_fit.py``.
+v0.4.0: build-volume fit check (``bed_fit``), see ``src/bed_fit.py``.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def analyze(
     it catches a part that is thin overall, not a thin wall on a thick
     part.
 
-    v0.3.7: ``bed_mm`` (x, y, z) overrides the ``PARTSMITH_BED_MM``
+    v0.4.0: ``bed_mm`` (x, y, z) overrides the ``PARTSMITH_BED_MM``
     env / X1C default for the build-volume fit check. A part that fits
     in no 90-degree orientation is reported as an issue.
     """

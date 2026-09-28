@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 JLay2026
 # SPDX-License-Identifier: MIT
-"""Build-volume fit check (v0.3.7, ROADMAP Theme 3).
+"""Build-volume fit check (v0.4.0, ROADMAP Theme 3).
 
 Pure stdlib so it can be unit-tested in the lightweight CI job without
 build123d / trimesh. Consumed by ``printability.analyze``.
@@ -58,6 +58,8 @@ def check_bed_fit(
     dims = tuple(float(d) for d in dims_mm)
     if len(dims) != 3 or len(bed) != 3:
         raise ValueError("dims_mm and bed_mm must each have exactly 3 entries")
+    if any(b <= 0 for b in bed):
+        raise ValueError(f"bed_mm entries must be > 0, got {list(bed)}")
 
     def _fits(candidate: Sequence[float]) -> bool:
         return all(c <= b + tolerance_mm for c, b in zip(candidate, bed))
