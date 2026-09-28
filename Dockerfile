@@ -26,9 +26,10 @@ RUN useradd --uid 1000 --create-home --shell /bin/bash app
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml constraints.txt ./
 COPY src/ ./src/
-RUN pip install --no-cache-dir .
+# v0.4.0: install against the locked, tested dependency set.
+RUN pip install --no-cache-dir -c constraints.txt .
 
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh

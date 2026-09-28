@@ -4,12 +4,13 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-09-07 (post-v0.3.7 — first re-sequence driven
-by real usage. Three print projects Jun 22–Jul 6 (rug_hanger,
-vise_hanger v2–v8, mms_mount v3–v6) showed what actually hurts:
-bed-fit (shipped v0.3.7) and the Bambu 3MF handoff. Theme 3 moves
-ahead of #14; pre-slice time/material/overhang analysis drops to
-backlog for lack of demand.)
+**Last updated:** 2026-09-28 (0.3.7 was never tagged; its work folds
+into **v0.4.0** with release hardening — dependency lock file, REST/MCP
+parity fixes. Real usage Jun–Sep (rug_hanger, vise_hanger v2–v8,
+mms_mount v3–v6, sw2 rack tray/wing/bar) showed what hurts: bed fit,
+the Bambu 3MF handoff, and — new in September — **multi-part designs
+that must mate** (third project with mating parts). Theme 3 stays ahead
+of #14; pre-slice time/material/overhang analysis stays in backlog.)
 
 ---
 
@@ -19,8 +20,8 @@ backlog for lack of demand.)
 |---|---|
 | Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 backlog) |
 | Theme 2 — Output fidelity      | 🟡 Paused (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; #14 review renderer → v0.5.0) |
-| Theme 3 — Print workflow       | 🟡 In progress (bed-fit v0.3.7; 3MF metadata + keystone helper + cookbook → v0.4.0) |
-| Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6) |
+| Theme 3 — Print workflow       | 🟡 In progress (bed-fit merged; 3MF multi-body + assembly clearance + keystone helper + cookbook → v0.4.0) |
+| Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6; locked deps + REST parity tests v0.4.0) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
 ---
@@ -41,11 +42,15 @@ backlog for lack of demand.)
 - **Reuse the platform's native patterns.** ZimaOS provides Custom
   Install + x-casaos; we use it natively rather than inventing a
   parallel install flow.
-- **Audit the design store before planning.** The v0.3.7 re-sequence
+- **Audit the design store before planning.** The Sept 2026 re-sequence
   came from `partsmith_list_designs` on the live box, not from the
   issue tracker. It also revealed that every July iteration was saved
   as a new name (`vise_hanger_v2`…`_v8`) so `diff_designs` never ran —
-  a tool-description problem, fixed in v0.3.7.
+  a tool-description problem, fixed in v0.4.0.
+- **Builds are reproducible.** The image installs from a locked
+  `constraints.txt`; dependency upgrades are a deliberate, tested
+  change, never a side effect of rebuilding `:latest` (lesson from the
+  Sept 2026 mcp 2.x break).
 - **Earn the feature with real demand.** New patterns (helpers,
   cookbook entries) get added when a real design has demanded them
   twice, not on speculation. See the cookbook (#4) deferral and the
@@ -100,15 +105,20 @@ and "X1C is printing it." **Re-scoped 2026-09-07 from the July prints:**
 the two things that actually cost iterations were bed size
 (vise_hanger v4 → v4.1 existed only to shrink 260 → 250 mm) and the
 Bambu Studio handoff. Time/material/overhang estimates did not.
+**Added 2026-09-28:** three projects now have parts that must mate
+(mms_mount_v6 + retainer, rug_hanger L/C/R, sw2 tray + wing + bar with
+M3 holes that must land on heat-set bosses), so checking fit *between*
+parts and exporting several bodies per plate are earned.
 
 | Item | What it gives you | Effort | Status |
 | --- | --- | --- | --- |
-| Build-volume fit check (`PARTSMITH_BED_MM`, per-call `bed_mm`) | Catch "doesn't fit the bed" at v2, not at the slicer | S | ✅ Shipped v0.3.7 |
-| 3MF with Bambu metadata (orientation, supports, AMS slot per body) | One fewer click in Bambu Studio per part | M | ⬜ v0.4.0 (file an issue first) |
+| Build-volume fit check (`PARTSMITH_BED_MM`, per-call `bed_mm`) | Catch "doesn't fit the bed" at v2, not at the slicer | S | ✅ Merged (ships in v0.4.0) |
+| Assembly clearance / interference check between two models | Catch "the M3 hole misses the boss" before printing both parts | M | ⬜ v0.4.0 (issue filed) |
+| 3MF with Bambu metadata — multiple bodies per plate, orientation, AMS slot per body | One fewer click in Bambu Studio per part; whole assemblies on one plate | M | ⬜ v0.4.0 (issue filed) |
 | Pre-slicing analysis — print time, material, overhang map, COM tipping risk | Catch "needs supports" before you slice | L | ⬜ Backlog — no demand observed |
 | Optional: Bambu Connect / MQTT integration | Skip Bambu Studio for repeat prints | XL (out-of-tree candidate) | ⬜ v0.6+ / out-of-tree |
 
-**Target release:** v0.4.0 (3MF metadata + keystone helper + cookbook);
+**Target release:** v0.4.0 (3MF metadata + clearance check + keystone helper + cookbook);
 Bambu Connect deferred to v0.6+ or out-of-tree plugin.
 
 ---
@@ -129,7 +139,7 @@ capped, killing the last unbounded inline payload.
 | [#20](https://github.com/JLay2026/partsmith/issues/20) | Opt-in, capped create/modify/load preview (no more unbounded auto-PNG) | ✅ Shipped v0.3.6 |
 
 **Shipped:**
-- `ci.yml` lightweight pytest job (ruff + `tests/test_versioning.py` on every PR, ~30s)
+- `ci.yml` lightweight pytest job (ruff + `tests/test_versioning.py` + `tests/test_bed_fit.py` on every PR, ~30s)
 - `integration.yml` — builds the container, starts it, runs `tests/integration/` against `/health` + `/mcp/`
 - Integration files: `test_health`, `test_mcp_handshake` (v0.3.1);
   `test_mcp_tools` (create→export→section→drawing round-trips + export
@@ -140,6 +150,8 @@ capped, killing the last unbounded inline payload.
   a fetchable `url_path` fallback
 - v0.3.6: `create_model`/`modify_model`/`load_design` preview is opt-in
   (`include_preview`, default off), downscaled + capped when requested
+- v0.4.0: image installs from locked `constraints.txt`;
+  `test_rest_parity.py` guards REST behavior for the v0.4.0 additions
 
 ---
 
@@ -178,15 +190,19 @@ v0.3.3  ✅ Theme 2 #13 — cross-section fill + topology deltas
 v0.3.4  ✅ Theme 2 #12 — dimensioned drawings
 v0.3.5  ✅ Theme 4 #18 — robust artifact delivery (sha256 + url_path on file responses)
 v0.3.6  ✅ Theme 4 #20 — opt-in, capped create preview
-v0.3.7  ✅ Theme 3     — bed-fit check; versioned-name warning; README drift
+v0.3.7  ⏭️ never tagged — folded into v0.4.0
 ---- you are here ----
-v0.4.0  — Theme 3: Bambu 3MF metadata; keystone_slot helper; #4 cookbook
-          seeded from rug_hanger / vise_hanger / mms_mount
+v0.4.0  — merged: bed-fit check; versioned-name warning (REST + MCP);
+          mcp<2 pin; locked constraints.txt; README/doc drift
+          to build: Bambu 3MF (multi-body); assembly clearance check;
+          keystone_slot helper; #4 cookbook seeded from real designs
 v0.5.0  — Theme 2 #14 review-grade renderer (diagnostics JSON, contact
           sheet, matplotlib legibility; PyVista gate intact)
 v0.6+   — Bambu Connect or whatever real workloads surface
 backlog — pre-slice time/material/overhang analysis; drawing feature
-          callouts; nut/ retrofit
+          callouts; nut/ retrofit; migrate to mcp 2.x SDK (FastMCP ->
+          MCPServer, transport API changes; integration suite covers
+          the surface)
 v1.0    — when partsmith has been used in earnest for 6 months and
           no longer surfaces sharp edges
 ```

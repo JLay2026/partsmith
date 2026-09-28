@@ -27,7 +27,7 @@ no authentication itself — the perimeter is the security boundary (see
   any plane — all returned as inline PNGs without leaving the chat.
 - **Validate** printability: watertight / manifold / minimum-dimension
   checks, plus a **build-volume fit check** against your printer's bed
-  (v0.3.7), before you ever open a slicer.
+  (v0.4.0), before you ever open a slicer.
 - **Persist + version** designs to disk: every save is a new version,
   with a `diff` that reports source changes + geometry deltas (volume,
   surface area, bounding box) between any two versions.
@@ -66,10 +66,10 @@ docker run -d --name partsmith \
   ghcr.io/jlay2026/partsmith:latest
 
 curl http://127.0.0.1:8123/health
-# {"status":"ok","version":"0.3.7"}
+# {"status":"ok","version":"0.4.0"}
 ```
 
-Pin a specific version with `:0.3.7` instead of `:latest`. Available
+Pin a specific version with `:0.4.0` instead of `:latest`. Available
 tags: <https://github.com/JLay2026/partsmith/pkgs/container/partsmith>.
 
 ### Option C — local dev (build from source)
@@ -86,6 +86,10 @@ Or build the container locally: `docker compose up -d --build`
 (pre-create + chown `workspace/` and `renders/` as uid 1000 first, as
 above).
 
+The image installs against [`constraints.txt`](constraints.txt), a
+locked, tested dependency set (v0.4.0+), so builds are reproducible.
+For local dev, `pip install -c constraints.txt -e .` gets the same set.
+
 ## Connect an MCP client
 
 partsmith exposes a Streamable-HTTP MCP server at `/mcp/`. URL-based
@@ -99,12 +103,12 @@ directly — no shim process.
 | Auth | Whatever your reverse proxy enforces (send headers via the client's Headers field) |
 
 On connect, the client sees the full `partsmith_*` tool surface (18
-tools as of v0.3.7).
+tools as of v0.4.0).
 
 **Naming tip for agents:** use one stable name per part and re-save it
 as you iterate (`bracket` → `bracket` → `bracket`), not
 `bracket_v1` → `bracket_v2`. The design store versions automatically,
-and only same-name versions can be diffed. Since v0.3.7, saving a
+and only same-name versions can be diffed. Since v0.4.0, saving a
 version-suffixed name returns a `warning` pointing at the base name.
 
 ## build123d helpers
@@ -170,7 +174,7 @@ designs/bracket/
 | `/render/drawing` | POST | Dimensioned engineering drawing (overall W/H + title block) | v0.3.4 |
 | `/render/all` | POST | Render every standard view to disk | v0.1 |
 | `/export` | POST | Export STL / STEP / 3MF as binary | v0.1 |
-| `/analyze/printability` | POST | Watertight / manifold / min-dimension + bed-fit check (`bed_mm` override) | v0.1 (bed-fit v0.3.7) |
+| `/analyze/printability` | POST | Watertight / manifold / min-dimension + bed-fit check (`bed_mm` override) | v0.1 (bed-fit v0.4.0) |
 | `/workspace/{filename}` | GET | Stream a previously-exported file (MCP large-file fallback) | v0.2 |
 | `/design/save` | POST | Save a design version (also executes as a model) | v0.2.4 |
 | `/design/list` | GET | List saved designs (latest of each) | v0.2.4 |
@@ -197,7 +201,7 @@ All prefixed `partsmith_` to avoid collisions in multi-server setups.
 | `partsmith_render_section` | **Cross-section** through a plane | v0.2.6 |
 | `partsmith_render_drawing` | Dimensioned engineering drawing + title block | v0.3.4 |
 | `partsmith_export` | Export STL / STEP / 3MF | v0.2 |
-| `partsmith_analyze_printability` | Watertight / manifold / min-dimension + **bed-fit** check | v0.2 (bed-fit v0.3.7) |
+| `partsmith_analyze_printability` | Watertight / manifold / min-dimension + **bed-fit** check | v0.2 (bed-fit v0.4.0) |
 | `partsmith_save_design` | Save a design version | v0.2.4 |
 | `partsmith_load_design` | Load + execute a saved design | v0.2.4 |
 | `partsmith_list_designs` | List saved designs | v0.2.4 |
@@ -249,9 +253,11 @@ with the same auth headers.
 Two GitHub Actions workflows run on every PR + push to main:
 
 - **`ci.yml`** — `ruff` lint + a lightweight `pytest` job
-  (`tests/test_versioning.py`, pure stdlib, ~13 s).
+  (`tests/test_versioning.py` + `tests/test_bed_fit.py`, pure stdlib,
+  ~15 s).
 - **`integration.yml`** — builds the container, starts it, and runs
-  `tests/integration/` against `/health` and `/mcp/`. A single MCP
+  `tests/integration/` against `/health`, `/mcp/`, and the REST
+  surface (REST/MCP parity checks since v0.4.0). A single MCP
   handshake test guards against the v0.2.x deploy-bug classes
   (lifespan crash, double-prefixed URL, DNS-rebinding 421, stateful
   long-poll hang). Run locally with:

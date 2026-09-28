@@ -340,7 +340,7 @@ def _create(partsmith_url, code, name, req_id):
 
 
 def test_bed_fit_via_mcp(partsmith_url):
-    """v0.3.7: analyze_printability flags a 260 mm part on the 256 mm X1C
+    """v0.4.0: analyze_printability flags a 260 mm part on the 256 mm X1C
     default bed and passes the 250 mm fix (the real vise_hanger v4 -> v4.1
     story)."""
     init = _initialize(partsmith_url)
@@ -405,9 +405,23 @@ def test_bed_fit_via_mcp(partsmith_url):
     )
     assert big["bed_fit"]["fits_as_oriented"] is True
 
+    # v0.4.0: non-positive bed dims are rejected, not silently failed.
+    bad = _tool_result_dict(
+        _rpc(
+            partsmith_url,
+            "tools/call",
+            {
+                "name": "partsmith_analyze_printability",
+                "arguments": {"name": "ci-bedfit-wide", "bed_mm": [0, 256, 256]},
+            },
+            req_id=7,
+        ).json()
+    )
+    assert "error" in bad and "> 0" in bad["error"], bad
+
 
 def test_save_design_versioned_name_warning(partsmith_url):
-    """v0.3.7: saving 'foo_v2' succeeds but returns a warning that names the
+    """v0.4.0: saving 'foo_v2' succeeds but returns a warning that names the
     base design; a plain name returns no warning."""
     init = _initialize(partsmith_url)
     assert init.status_code == 200

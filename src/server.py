@@ -67,7 +67,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, Union
+from typing import Annotated, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -77,7 +77,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from .cad_engine import CADEngine
-from .design_store import DesignStore
+from .design_store import DesignStore, versioned_name_warning
 from .mcp_transport import build_mcp
 from .printability import analyze as analyze_printability
 from .renderer import (
@@ -172,7 +172,7 @@ app = FastAPI(title="partsmith", version=__version__, lifespan=_lifespan)
 app.add_middleware(BodySizeLimitMiddleware)
 
 
-# ── Request schemas ──────────────────────────────────
+# ── Request schemas ─────────────────────────────────────
 
 class CreateModelRequest(BaseModel):
     code: str = Field(..., max_length=MAX_REQUEST_BYTES)
@@ -208,8 +208,10 @@ class ExportRequest(BaseModel):
 class PrintabilityRequest(BaseModel):
     name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
     min_wall_thickness: float = Field(0.8, ge=0.0, le=100.0)
-    # v0.3.7: optional [x, y, z] build-volume override (mm).
-    bed_mm: Optional[list[float]] = Field(None, min_length=3, max_length=3)
+    # v0.4.0: optional [x, y, z] build-volume override (mm), each > 0.
+    bed_mm: Optional[list[Annotated[float, Field(gt=0.0, le=10000.0)]]] = Field(
+        None, min_length=3, max_length=3,
+    )
 
 
 class SaveDesignRequest(BaseModel):
@@ -469,7 +471,7 @@ def save_design(req: SaveDesignRequest):
             f"Save failed: {e}. Check that {store.designs_dir} is writable by uid 1000.",
         )
 
-    return {
+    out = {
         "saved": True,
         "execution": {
             "success": execution_result.get("success", False),
@@ -478,6 +480,11 @@ def save_design(req: SaveDesignRequest):
         },
         "metadata": metadata.to_dict(),
     }
+    # v0.4.0: same versioned-name warning as the MCP tool (parity).
+    warning = versioned_name_warning(store, req.name)
+    if warning:
+        out["warning"] = warning
+    return out
 
 
 @app.get("/design/list")

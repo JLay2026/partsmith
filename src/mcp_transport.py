@@ -19,7 +19,7 @@ v0.3.6 (issue #20): create/modify/load preview is now opt-in
                    downscaled + capped so it can never blow the client's
                    response token budget. Previously every create
                    embedded a full 800x600 iso PNG unconditionally.
-v0.3.7: build-volume fit in analyze_printability (bed_fit); save_design
+v0.4.0: build-volume fit in analyze_printability (bed_fit); save_design
                    warns when the name carries its own version suffix
                    (steers the caller toward same-name auto-versioning).
 """
@@ -35,7 +35,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import __version__
 from .cad_engine import CADEngine
-from .design_store import DesignStore, versioned_name_base
+from .design_store import DesignStore, versioned_name_warning
 from .printability import analyze as analyze_printability
 from .renderer import (
     render_2d,
@@ -380,7 +380,7 @@ def build_mcp(
 
         Checks: watertight, closed volume, degenerate faces, smallest
         bounding-box dimension vs ``min_wall_thickness_mm`` (a whole-
-        part thinness check, NOT local wall thickness), and -- v0.3.7 --
+        part thinness check, NOT local wall thickness), and -- v0.4.0 --
         build-volume fit.
 
         ``bed_fit`` in the result reports ``fits_as_oriented``,
@@ -399,8 +399,10 @@ def build_mcp(
         state, err = _need_shape(name)
         if err:
             return err
-        if bed_mm is not None and len(bed_mm) != 3:
-            return {"error": "bed_mm must be [x, y, z] in mm"}
+        if bed_mm is not None and (
+            len(bed_mm) != 3 or any(b <= 0 for b in bed_mm)
+        ):
+            return {"error": "bed_mm must be [x, y, z] in mm, each > 0"}
         return analyze_printability(
             state.shape,
             min_wall_thickness_mm=min_wall_thickness_mm,
@@ -427,7 +429,7 @@ def build_mcp(
         partsmith_diff_designs / partsmith_list_versions. Iterating
         "bracket_v1" -> "bracket_v2" -> "bracket_v3" creates three
         unrelated designs each stuck at version 1 and nothing can be
-        diffed. v0.3.7: a name with a version suffix still saves, but
+        diffed. v0.4.0: a name with a version suffix still saves, but
         the response carries a ``warning`` naming the base you should
         have used.
 
@@ -479,22 +481,9 @@ def build_mcp(
             },
             "metadata": metadata.to_dict(),
         }
-        base = versioned_name_base(name)
-        if base:
-            try:
-                base_versions = store.list_versions(base)
-            except ValueError:
-                base_versions = []
-            hint = (
-                f"'{name}' looks like a versioned name. Save iterations "
-                f"under '{base}' instead and let version=\"auto\" number "
-                "them; that enables partsmith_diff_designs."
-            )
-            if base_versions:
-                hint += (
-                    f" '{base}' already exists at versions {base_versions}."
-                )
-            out["warning"] = hint
+        warning = versioned_name_warning(store, name)
+        if warning:
+            out["warning"] = warning
         return out
 
     @mcp.tool()

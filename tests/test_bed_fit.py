@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 JLay2026
 # SPDX-License-Identifier: MIT
-"""Unit tests for the v0.3.7 build-volume fit check.
+"""Unit tests for the v0.4.0 build-volume fit check.
 
 ``src.bed_fit`` is pure stdlib, so this runs in the lightweight CI job.
 The two anchor cases are the real vise_hanger_v4 (260 mm, rejected by
@@ -79,3 +79,12 @@ def test_rejects_bad_shapes():
 
     with pytest.raises(ValueError):
         check_bed_fit([1, 2], bed_mm=[256, 256, 256])
+
+
+@pytest.mark.parametrize("bad_bed", [[0, 256, 256], [256, -1, 256], [256, 256, 0.0]])
+def test_rejects_non_positive_bed(bad_bed):
+    """v0.4.0: a zero or negative bed would silently fail every part."""
+    from src.bed_fit import check_bed_fit
+
+    with pytest.raises(ValueError, match="> 0"):
+        check_bed_fit([10, 10, 10], bed_mm=bad_bed)
