@@ -515,3 +515,45 @@ def test_get_design_via_mcp(partsmith_url):
     assert got["metadata"]["version"] >= 1
     assert "error" in _call(partsmith_url, "partsmith_get_design", {"name": "ci-no-such"}, 4)
     _call(partsmith_url, "partsmith_delete_design", {"name": "ci-get-src"}, 5)
+
+
+def test_export_3mf_is_real_3mf_via_mcp(partsmith_url):
+    """v0.4.0 regression: format='3mf' used to deliver an STL."""
+    import io
+    import zipfile
+
+    assert _initialize(partsmith_url).status_code == 200
+    _create(partsmith_url, "from build123d import *\nresult = Box(9, 9, 9)", "ci-3mf-cube", 2)
+    r = _call(partsmith_url, "partsmith_export", {"name": "ci-3mf-cube", "format": "3mf"}, 3)
+    assert r["filename"] == "ci-3mf-cube.3mf", r.get("filename")
+    data = base64.b64decode(r["data_b64"])
+    assert zipfile.is_zipfile(io.BytesIO(data))
+
+
+def test_export_plate_via_mcp(partsmith_url):
+    """v0.4.0 (#26): parts modeled overlapping are arranged apart on one plate."""
+    import io
+    import re
+    import zipfile
+
+    assert _initialize(partsmith_url).status_code == 200
+    _create(partsmith_url, "from build123d import *\nresult = Box(80, 45, 60)", "ci-plate-a", 2)
+    _create(partsmith_url, "from build123d import *\nresult = Cylinder(15, 4)", "ci-plate-b", 3)
+
+    r = _call(partsmith_url, "partsmith_export_plate", {"names": ["ci-plate-a", "ci-plate-b"]}, 4)
+    assert r.get("filename", "").endswith(".3mf"), r
+    data = base64.b64decode(r["data_b64"])
+    assert len(data) == r["size_bytes"] and hashlib.sha256(data).hexdigest() == r["sha256"]
+    xml = zipfile.ZipFile(io.BytesIO(data)).read("3D/3dmodel.model")
+    assert re.findall(rb'<object [^>]*name="([^"]+)"', xml) == [b"ci-plate-a", b"ci-plate-b"]
+    a, b = r["plate"]["placements"]
+    assert b["bbox_min_mm"][0] >= a["bbox_max_mm"][0]  # side by side, not overlapping
+    assert r["url_path"] == f"/workspace/{r['filename']}"
+
+    overlap = _call(
+        partsmith_url,
+        "partsmith_export_plate",
+        {"names": ["ci-plate-a", "ci-plate-b"], "layout": "as_modeled"},
+        5,
+    )
+    assert "overlap" in overlap.get("error", ""), overlap
