@@ -56,3 +56,29 @@ def test_rest_printability_bed_fit_and_validation(partsmith_url):
             partsmith_url, "/analyze/printability", {"name": "ci-rest-bed", "bed_mm": bad}
         )
         assert resp.status_code == 422, (bad, resp.status_code, resp.text[:200])
+
+
+def test_rest_analyze_fit_matches_mcp_shape(partsmith_url):
+    """v0.4.0 (#25): POST /analyze/fit returns the same payload as the MCP tool."""
+    for name, code in (
+        ("ci-rest-fit-a", "from build123d import *\nresult = Box(10, 10, 10)"),
+        ("ci-rest-fit-b", "from build123d import *\nresult = Box(10, 10, 10)"),
+    ):
+        r = _post(partsmith_url, "/model/create", {"name": name, "code": code})
+        assert r.status_code == 200 and r.json().get("success") is True, r.text[:300]
+
+    body = {"name_a": "ci-rest-fit-a", "name_b": "ci-rest-fit-b", "offset_b": [10.5, 0, 0]}
+    r = _post(partsmith_url, "/analyze/fit", body)
+    assert r.status_code == 200, r.text[:300]
+    out = r.json()
+    for key in (
+        "interferes", "interference_volume_mm3", "interference_bbox", "min_distance_mm",
+        "closest_points", "contact", "min_clearance_mm", "offset_b", "ok", "issues",
+    ):
+        assert key in out, key
+    assert out["ok"] is True and abs(out["min_distance_mm"] - 0.5) < 1e-3
+
+    assert _post(partsmith_url, "/analyze/fit", {**body, "offset_b": [1, 2]}).status_code == 422
+    assert _post(partsmith_url, "/analyze/fit", {**body, "min_clearance_mm": -1}).status_code == 422
+    missing = _post(partsmith_url, "/analyze/fit", {"name_a": "ci-rest-fit-a", "name_b": "nope"})
+    assert missing.status_code == 404
