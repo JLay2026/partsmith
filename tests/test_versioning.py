@@ -334,7 +334,7 @@ def test_save_request_schema_accepts_version(tmp_path: Path):
     assert req2.version == 3
 
 
-# ── v0.3.7: versioned-name detection ─────────────────────────
+# ── v0.4.0: versioned-name detection ─────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -351,7 +351,24 @@ def test_save_request_schema_accepts_version(tmp_path: Path):
     ],
 )
 def test_versioned_name_base(name, base):
-    """Names that carry their own version suffix are detected (v0.3.7)."""
+    """Names that carry their own version suffix are detected (v0.4.0)."""
     from src.design_store import versioned_name_base
 
     assert versioned_name_base(name) == base
+
+
+def test_versioned_name_warning(tmp_path: Path):
+    """v0.4.0: shared REST/MCP warning names the base and its versions."""
+    from src.design_store import DesignStore, versioned_name_warning
+
+    s = DesignStore(workspace=tmp_path)
+    assert versioned_name_warning(s, "bracket") is None
+
+    w = versioned_name_warning(s, "bracket_v2")
+    assert w is not None and "'bracket'" in w
+    assert "already exists" not in w  # base not saved yet
+
+    s.save("bracket", "v1")
+    s.save("bracket", "v2")
+    w = versioned_name_warning(s, "bracket_v3")
+    assert "already exists at versions [1, 2]" in w
