@@ -63,11 +63,17 @@ v0.4.0 (issue #25):
 - Assembly fit check. `fit_check.check_fit()` + POST /analyze/fit +
   partsmith_check_fit MCP tool: interference + clearance between two
   models.
+
+v0.4.0 (issue #26):
+- Plate export. POST /export/plate + partsmith_export_plate: several
+  models in one standard 3MF, laid out side by side (or as modeled).
+  Also fixes `format="3mf"` exports, which silently wrote STL since v0.1.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 from contextlib import asynccontextmanager
@@ -125,7 +131,7 @@ def _safe_write(path: Path, data: bytes, context: str) -> None:
         )
 
 
-# ── Middleware ───────────────────────────────────────────
+# ── Middleware ───────────────────────────────────────────────────
 
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
     """Reject requests whose Content-Length exceeds MAX_REQUEST_BYTES."""
@@ -152,7 +158,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# ── App initialization ──────────────────────────────────
+# ── App initialization ──────────────────────────────────────────────
 
 engine = CADEngine(workspace=WORKSPACE)
 store = DesignStore(workspace=WORKSPACE)
@@ -178,7 +184,7 @@ app = FastAPI(title="partsmith", version=__version__, lifespan=_lifespan)
 app.add_middleware(BodySizeLimitMiddleware)
 
 
-# ── Request schemas ─────────────────────────────────────
+# ── Request schemas ─────────────────────────────────────────────────
 
 class CreateModelRequest(BaseModel):
     code: str = Field(..., max_length=MAX_REQUEST_BYTES)
@@ -211,6 +217,18 @@ class ExportRequest(BaseModel):
     format: str = Field("stl", pattern=r"^(stl|step|3mf)$")
 
 
+class PlateExportRequest(BaseModel):
+    """v0.4.0 (#26): several models in one standard 3MF plate."""
+    names: list[Annotated[str, Field(pattern=NAME_PATTERN, max_length=64)]] = Field(
+        ..., min_length=1, max_length=16,
+    )
+    layout: str = Field("arrange", pattern=r"^(arrange|as_modeled)$")
+    gap_mm: float = Field(5.0, ge=0.0, le=100.0)
+    bed_mm: Optional[list[Annotated[float, Field(gt=0.0, le=10000.0)]]] = Field(
+        None, min_length=3, max_length=3,
+    )
+
+
 class PrintabilityRequest(BaseModel):
     name: Optional[str] = Field(None, pattern=NAME_PATTERN, max_length=64)
     min_wall_thickness: float = Field(0.8, ge=0.0, le=100.0)
@@ -239,7 +257,7 @@ class SaveDesignRequest(BaseModel):
     version: Union[int, str] = Field(default="auto")
 
 
-# ── Health ───────────────────────────────────────────────
+# ── Health ───────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -400,7 +418,7 @@ def render_all_endpoint(req: RenderRequest):
     return out
 
 
-# ── Export ───────────────────────────────────────────────────
+# ── Export ─────────────────────────────────────────────────────────
 
 @app.post("/export")
 def export_model(req: ExportRequest):
@@ -421,7 +439,33 @@ def export_model(req: ExportRequest):
     )
 
 
-# ── Printability ─────────────────────────────────────────────
+@app.post("/export/plate")
+def export_plate_endpoint(req: PlateExportRequest):
+    """v0.4.0 (#26): several models as one standard 3MF plate (binary).
+
+    Placement details travel in the ``X-Partsmith-Plate`` header (JSON).
+    """
+    try:
+        path, info = engine.export_plate(
+            req.names, bed_mm=req.bed_mm, layout=req.layout, gap_mm=req.gap_mm,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(
+            500,
+            f"Export write failed: {e}. "
+            f"Check that {engine.workspace} is writable by uid 1000.",
+        )
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="model/3mf",
+        headers={"X-Partsmith-Plate": json.dumps(info, separators=(",", ":"))},
+    )
+
+
+# ── Printability ──────────────────────────────────────────────────
 
 @app.post("/analyze/printability")
 def analyze_printability_endpoint(req: PrintabilityRequest):
