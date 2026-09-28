@@ -56,7 +56,7 @@ _NAME_RE = re.compile(NAME_PATTERN)
 # match this pattern.
 _VERSION_STEM_RE = re.compile(r"^v(\d+)$")
 
-# v0.3.7: design names that carry their own version suffix
+# v0.4.0: design names that carry their own version suffix
 # ("bracket_v4", "bracket_v4_1"). Every July-2026 iteration series was
 # saved this way, which bypasses the versioned store entirely (each
 # name sat at version 1, so diff_designs never ran). Detected so the
@@ -72,6 +72,30 @@ def versioned_name_base(name: str) -> Optional[str]:
     """
     m = _VERSIONED_NAME_RE.match(name)
     return m.group("base") if m else None
+
+
+def versioned_name_warning(store: "DesignStore", name: str) -> Optional[str]:
+    """Steering message for a version-suffixed design name, else None.
+
+    Shared by the REST and MCP save paths so the two surfaces return the
+    same ``warning`` text (REST/MCP parity).
+    """
+    base = versioned_name_base(name)
+    if not base:
+        return None
+    try:
+        base_versions = store.list_versions(base)
+    except ValueError:
+        base_versions = []
+    hint = (
+        f"'{name}' looks like a versioned name. Save iterations "
+        f"under '{base}' instead and let version=\"auto\" number "
+        "them; that enables version diffs (partsmith_diff_designs / "
+        "GET /design/{name}/diff)."
+    )
+    if base_versions:
+        hint += f" '{base}' already exists at versions {base_versions}."
+    return hint
 
 
 @dataclass
@@ -119,7 +143,7 @@ class DesignStore:
         self.designs_dir = self.workspace / "designs"
         self.designs_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── name + path helpers ─────────────────────────────
+    # ── name + path helpers ───────────────────────────────────
 
     @staticmethod
     def _validate_name(name: str) -> None:
