@@ -20,7 +20,7 @@ of #14; pre-slice time/material/overhang analysis stays in backlog.)
 |---|---|
 | Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 backlog) |
 | Theme 2 — Output fidelity      | 🟡 Paused (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; #14 review renderer → v0.5.0) |
-| Theme 3 — Print workflow       | 🟡 In progress (bed-fit merged; 3MF multi-body + assembly clearance + keystone helper + cookbook → v0.4.0) |
+| Theme 3 — Print workflow       | 🟡 In progress (bed-fit + assembly fit check merged; multi-body Bambu 3MF + cookbook → v0.4.0) |
 | Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6; locked deps + REST parity tests v0.4.0) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
@@ -71,7 +71,7 @@ blank-page + iteration pain.
 | [#2](https://github.com/JLay2026/partsmith/issues/2) | Persistent design store — save/load build123d source to disk; survives container restart | ✅ Shipped v0.2.4 |
 | [#3](https://github.com/JLay2026/partsmith/issues/3) | Versioned designs + `partsmith_diff_designs(name, v1, v2)` | ✅ Shipped v0.2.7 |
 | [#4](https://github.com/JLay2026/partsmith/issues/4) | Cookbook — `examples/` dir with starter designs | 🟡 **Gate opened** — three real wall-mount/hanger designs exist; seed from them in v0.4.0 |
-| — | `keystone_slot(...)` helper (keyhole/keystone hanging slot) | ⬜ v0.4.0 — demanded by vise_hanger v6 + mms_mount; recurs across wall-mount parts |
+| [#27](https://github.com/JLay2026/partsmith/issues/27) | `keystone_slot(...)` helper (keyhole/keystone hanging slot) | ❌ Dropped 2026-09-28 — one real use (vise_hanger v6–v8); mms_mount uses plain countersunk holes. Reopen on a second use |
 
 ---
 
@@ -113,12 +113,12 @@ parts and exporting several bodies per plate are earned.
 | Item | What it gives you | Effort | Status |
 | --- | --- | --- | --- |
 | Build-volume fit check (`PARTSMITH_BED_MM`, per-call `bed_mm`) | Catch "doesn't fit the bed" at v2, not at the slicer | S | ✅ Merged (ships in v0.4.0) |
-| Assembly clearance / interference check between two models | Catch "the M3 hole misses the boss" before printing both parts | M | ⬜ v0.4.0 (issue filed) |
-| 3MF with Bambu metadata — multiple bodies per plate, orientation, AMS slot per body | One fewer click in Bambu Studio per part; whole assemblies on one plate | M | ⬜ v0.4.0 (issue filed) |
+| [#25](https://github.com/JLay2026/partsmith/issues/25) Assembly clearance / interference check between two models | Catch "the M3 hole misses the boss" before printing both parts | M | ✅ Merged (ships in v0.4.0) |
+| [#26](https://github.com/JLay2026/partsmith/issues/26) 3MF with Bambu metadata — multiple bodies per plate, filament/AMS slot per body | One fewer click in Bambu Studio per part; whole assemblies on one plate | M | ⬜ v0.4.0 — design pending approval |
 | Pre-slicing analysis — print time, material, overhang map, COM tipping risk | Catch "needs supports" before you slice | L | ⬜ Backlog — no demand observed |
 | Optional: Bambu Connect / MQTT integration | Skip Bambu Studio for repeat prints | XL (out-of-tree candidate) | ⬜ v0.6+ / out-of-tree |
 
-**Target release:** v0.4.0 (3MF metadata + clearance check + keystone helper + cookbook);
+**Target release:** v0.4.0 (3MF metadata + clearance check + cookbook);
 Bambu Connect deferred to v0.6+ or out-of-tree plugin.
 
 ---
@@ -193,9 +193,10 @@ v0.3.6  ✅ Theme 4 #20 — opt-in, capped create preview
 v0.3.7  ⏭️ never tagged — folded into v0.4.0
 ---- you are here ----
 v0.4.0  — merged: bed-fit check; versioned-name warning (REST + MCP);
-          mcp<2 pin; locked constraints.txt; README/doc drift
-          to build: Bambu 3MF (multi-body); assembly clearance check;
-          keystone_slot helper; #4 cookbook seeded from real designs
+          mcp<2 pin; locked constraints.txt; README/doc drift;
+          #25 assembly fit check; partsmith_get_design (parity)
+          to build: #26 multi-body Bambu 3MF; #4 cookbook seeded from
+          real designs (keystone helper #27 dropped)
 v0.5.0  — Theme 2 #14 review-grade renderer (diagnostics JSON, contact
           sheet, matplotlib legibility; PyVista gate intact)
 v0.6+   — Bambu Connect or whatever real workloads surface

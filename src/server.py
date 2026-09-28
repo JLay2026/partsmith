@@ -58,6 +58,11 @@ v0.3.4 (issue #12):
 - Dimensioned engineering drawings. `render_drawing()` + POST
   /render/drawing + partsmith_render_drawing MCP tool. Overall W/H
   dimension lines + title block; the plain render_2d W/H overlay stays.
+
+v0.4.0 (issue #25):
+- Assembly fit check. `fit_check.check_fit()` + POST /analyze/fit +
+  partsmith_check_fit MCP tool: interference + clearance between two
+  models.
 """
 
 from __future__ import annotations
@@ -78,6 +83,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import __version__
 from .cad_engine import CADEngine
 from .design_store import DesignStore, versioned_name_warning
+from .fit_check import check_fit
 from .mcp_transport import build_mcp
 from .printability import analyze as analyze_printability
 from .renderer import (
@@ -210,6 +216,16 @@ class PrintabilityRequest(BaseModel):
     min_wall_thickness: float = Field(0.8, ge=0.0, le=100.0)
     # v0.4.0: optional [x, y, z] build-volume override (mm), each > 0.
     bed_mm: Optional[list[Annotated[float, Field(gt=0.0, le=10000.0)]]] = Field(
+        None, min_length=3, max_length=3,
+    )
+
+
+class FitRequest(BaseModel):
+    """v0.4.0 (#25): interference + clearance between two models."""
+    name_a: str = Field(..., pattern=NAME_PATTERN, max_length=64)
+    name_b: str = Field(..., pattern=NAME_PATTERN, max_length=64)
+    min_clearance_mm: float = Field(0.2, ge=0.0, le=100.0)
+    offset_b: Optional[list[Annotated[float, Field(ge=-10000.0, le=10000.0)]]] = Field(
         None, min_length=3, max_length=3,
     )
 
@@ -417,6 +433,22 @@ def analyze_printability_endpoint(req: PrintabilityRequest):
         min_wall_thickness_mm=req.min_wall_thickness,
         bed_mm=req.bed_mm,
     )
+
+
+@app.post("/analyze/fit")
+def analyze_fit_endpoint(req: FitRequest):
+    """v0.4.0 (#25): do two loaded models collide, and how much room is there?"""
+    shapes = []
+    for n in (req.name_a, req.name_b):
+        state = engine.get(n)
+        if not state or not state.shape:
+            raise HTTPException(404, f"No model '{n}' found")
+        shapes.append(state.shape)
+    out = check_fit(
+        shapes[0], shapes[1],
+        min_clearance_mm=req.min_clearance_mm, offset_b=req.offset_b,
+    )
+    return {"name_a": req.name_a, "name_b": req.name_b, **out}
 
 
 # ── v0.2: workspace file serving ────

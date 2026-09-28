@@ -7,11 +7,23 @@ this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 ## [0.4.0] — Unreleased
 
 Folds in the never-tagged 0.3.7 work (merged in #24) plus release
-hardening. Theme 3 feature work (Bambu 3MF, assembly clearance check,
-keystone helper, cookbook) lands on top before the tag; entries below
-are what is merged so far.
+hardening (#28), then Theme 3 features. Still to land before the tag:
+multi-body Bambu 3MF (#26) and the cookbook (#4). The keystone helper
+(#27) was dropped for lack of a second real use.
 
 ### Added
+- **Assembly fit check** (#25) — `partsmith_check_fit` (MCP) +
+  `POST /analyze/fit` (REST), in new `src/fit_check.py`. Reports
+  whether two models overlap (volume + the region where they do),
+  the minimum gap and the closest-point pair, and `ok` against a
+  required `min_clearance_mm` (default 0.2). Parts are compared in
+  their modeled coordinates (mating parts designed in a shared
+  assembly frame need nothing else); `offset_b` translates a part
+  modeled at the origin into place. Uses the B-rep kernel already in
+  the image — no new dependency; ~0.06 s on a 131-face part.
+- **`partsmith_get_design`** — read a saved design's source and
+  metadata without executing it. Closes a REST/MCP parity gap:
+  REST has had `GET /design/{name}` since v0.2.4.
 - **Build-volume fit check** (`src/bed_fit.py`, wired into
   `printability.analyze`). `analyze_printability` (MCP + REST) now
   returns a `bed_fit` block: `bed_mm`, `fits_as_oriented`,
@@ -33,7 +45,10 @@ are what is merged so far.
   `pip install -c constraints.txt .`, so builds are reproducible and
   dependency upgrades are deliberate. Regeneration command is in the
   file header.
-- Tests: `tests/test_bed_fit.py` (stdlib, in the lightweight CI job),
+- Tests: `tests/test_fit_check.py` (overlap, contact, gap, Ø4.8 peg in
+  Ø5.2 socket = 0.2 mm, `offset_b`), fit-check and `get_design`
+  integration tests (MCP + REST), `tests/test_bed_fit.py` (stdlib, in
+  the lightweight CI job),
   `test_versioned_name_base` + `test_versioned_name_warning` in
   `test_versioning.py`, bed-fit and versioned-name integration tests in
   `test_mcp_tools.py`, and new `tests/integration/test_rest_parity.py`
@@ -71,6 +86,11 @@ intentional.
 
 The mcp 2.x break showed that unbounded dependencies make `:latest`
 unreproducible; the lock file closes that class of failure.
+
+Three projects now have parts that must mate (sw2 tray + wing + bar,
+mms_mount_v6 + retainer, rug_hanger L/C/R). Until now each part could
+only be checked alone, so a hole that missed its boss was found after
+printing both.
 
 ### Verification
 Locked set installed on CPython 3.11: 50 unit tests (including the

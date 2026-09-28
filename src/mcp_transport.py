@@ -22,6 +22,9 @@ v0.3.6 (issue #20): create/modify/load preview is now opt-in
 v0.4.0: build-volume fit in analyze_printability (bed_fit); save_design
                    warns when the name carries its own version suffix
                    (steers the caller toward same-name auto-versioning).
+                   partsmith_check_fit (issue #25): interference +
+                   clearance between two models. partsmith_get_design:
+                   read saved source (parity with REST GET /design/{name}).
 """
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ from mcp.server.fastmcp import FastMCP
 from . import __version__
 from .cad_engine import CADEngine
 from .design_store import DesignStore, versioned_name_warning
+from .fit_check import check_fit
 from .printability import analyze as analyze_printability
 from .renderer import (
     render_2d,
@@ -409,7 +413,79 @@ def build_mcp(
             bed_mm=bed_mm,
         )
 
+    @mcp.tool()
+    def partsmith_check_fit(
+        name_a: str,
+        name_b: str,
+        min_clearance_mm: float = 0.2,
+        offset_b: Optional[list[float]] = None,
+    ) -> dict:
+        """v0.4.0: check whether two loaded models collide or have room.
+
+        Use this on mating parts before printing either one -- a hole
+        that must land on a boss, a peg in a socket, a retainer on a
+        post. Parts are compared in the coordinates they were modeled
+        in, so parts designed in one shared assembly frame need nothing
+        else. For a part modeled at the origin, pass ``offset_b`` to
+        translate model b into place first (translation only).
+
+        Returns:
+            interferes, interference_volume_mm3, interference_bbox
+                (where the overlap is), min_distance_mm, closest_points
+                {a, b}, contact (touching, no overlap), ok, issues.
+            ``ok`` means no overlap AND min_distance_mm >=
+            min_clearance_mm. Use ~0.2 mm for slip fits on FDM parts,
+            0 to only forbid overlap.
+
+        Args:
+            name_a: First model (must be loaded).
+            name_b: Second model (must be loaded).
+            min_clearance_mm: Required gap in mm (>= 0). Default 0.2.
+            offset_b: Optional [x, y, z] mm translation applied to b.
+        """
+        state_a, err = _need_shape(name_a)
+        if err:
+            return err
+        state_b, err = _need_shape(name_b)
+        if err:
+            return err
+        if min_clearance_mm < 0:
+            return {"error": "min_clearance_mm must be >= 0"}
+        if offset_b is not None and len(offset_b) != 3:
+            return {"error": "offset_b must be [x, y, z] in mm"}
+        out = check_fit(
+            state_a.shape, state_b.shape,
+            min_clearance_mm=min_clearance_mm, offset_b=offset_b,
+        )
+        return {"name_a": name_a, "name_b": name_b, **out}
+
     # -- v0.2.4 + v0.2.7: design store tools ----------------
+
+    @mcp.tool()
+    def partsmith_get_design(
+        name: str,
+        version: Optional[int] = None,
+    ) -> dict:
+        """v0.4.0: read a saved design's source code + metadata.
+
+        Does NOT execute it (use partsmith_load_design for that). Use
+        this to see or reuse the build123d source of an earlier design.
+        Parity with REST ``GET /design/{name}``.
+
+        Args:
+            name: Design identifier.
+            version: Specific version, or None (default) for latest.
+
+        Returns:
+            code (str), metadata (dict including version).
+        """
+        try:
+            code, metadata = store.load(name, version=version)
+        except FileNotFoundError:
+            return {"error": f"Design not found: {name}"}
+        except ValueError as e:
+            return {"error": f"Invalid name or version: {e}"}
+        return {"code": code, "metadata": metadata.to_dict()}
 
     @mcp.tool()
     def partsmith_save_design(
