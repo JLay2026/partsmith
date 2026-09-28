@@ -34,7 +34,7 @@ no authentication itself — the perimeter is the security boundary (see
 - **Persist + version** designs to disk: every save is a new version,
   with a `diff` that reports source changes + geometry deltas (volume,
   surface area, bounding box) between any two versions.
-- **Export** to STL / STEP / 3MF.
+- **Export** to STL / STEP / 3MF, including several parts on one print plate as a single 3MF.
 
 Everything works identically over REST and MCP — both share the same
 in-process engine, so a model authored via one protocol is visible to
@@ -105,7 +105,7 @@ directly — no shim process.
 | Transport | `streamable-http` |
 | Auth | Whatever your reverse proxy enforces (send headers via the client's Headers field) |
 
-On connect, the client sees the full `partsmith_*` tool surface (20
+On connect, the client sees the full `partsmith_*` tool surface (21
 tools as of v0.4.0).
 
 **Naming tip for agents:** use one stable name per part and re-save it
@@ -177,6 +177,7 @@ designs/bracket/
 | `/render/drawing` | POST | Dimensioned engineering drawing (overall W/H + title block) | v0.3.4 |
 | `/render/all` | POST | Render every standard view to disk | v0.1 |
 | `/export` | POST | Export STL / STEP / 3MF as binary | v0.1 |
+| `/export/plate` | POST | Several models on one plate as one 3MF (`names`, `layout`=`arrange`\|`as_modeled`, `gap_mm`, `bed_mm`); placements in `X-Partsmith-Plate` header | v0.4.0 |
 | `/analyze/printability` | POST | Watertight / manifold / min-dimension + bed-fit check (`bed_mm` override) | v0.1 (bed-fit v0.4.0) |
 | `/analyze/fit` | POST | Interference + clearance between two models (`name_a`, `name_b`, `min_clearance_mm`, `offset_b`) | v0.4.0 |
 | `/workspace/{filename}` | GET | Stream a previously-exported file (MCP large-file fallback) | v0.2 |
@@ -205,6 +206,7 @@ All prefixed `partsmith_` to avoid collisions in multi-server setups.
 | `partsmith_render_section` | **Cross-section** through a plane | v0.2.6 |
 | `partsmith_render_drawing` | Dimensioned engineering drawing + title block | v0.3.4 |
 | `partsmith_export` | Export STL / STEP / 3MF | v0.2 |
+| `partsmith_export_plate` | Several models on one print plate as one 3MF (side-by-side by default) | v0.4.0 |
 | `partsmith_analyze_printability` | Watertight / manifold / min-dimension + **bed-fit** check | v0.2 (bed-fit v0.4.0) |
 | `partsmith_check_fit` | Interference + clearance between two models | v0.4.0 |
 | `partsmith_save_design` | Save a design version | v0.2.4 |
