@@ -463,3 +463,55 @@ def test_save_design_versioned_name_warning(partsmith_url):
             {"name": "partsmith_delete_design", "arguments": {"name": n}},
             req_id=4,
         )
+
+
+def _call(partsmith_url, tool, args, req_id):
+    return _tool_result_dict(
+        _rpc(
+            partsmith_url, "tools/call", {"name": tool, "arguments": args}, req_id=req_id
+        ).json()
+    )
+
+
+def test_check_fit_via_mcp(partsmith_url):
+    """v0.4.0 (#25): overlap, clearance, and offset_b through MCP."""
+    assert _initialize(partsmith_url).status_code == 200
+    _create(partsmith_url, "from build123d import *\nresult = Box(10, 10, 10)", "ci-fit-a", 2)
+    _create(
+        partsmith_url,
+        "from build123d import *\nresult = Box(10, 10, 10).moved(Location((8, 0, 0)))",
+        "ci-fit-b",
+        3,
+    )
+
+    pair = {"name_a": "ci-fit-a", "name_b": "ci-fit-b"}
+    hit = _call(partsmith_url, "partsmith_check_fit", pair, 4)
+    assert hit["interferes"] is True, hit
+    assert abs(hit["interference_volume_mm3"] - 200.0) < 0.1
+    assert hit["ok"] is False
+
+    clear = _call(
+        partsmith_url,
+        "partsmith_check_fit",
+        {"name_a": "ci-fit-a", "name_b": "ci-fit-b", "offset_b": [2.5, 0, 0]},
+        5,
+    )
+    assert clear["interferes"] is False and abs(clear["min_distance_mm"] - 0.5) < 1e-3
+    assert clear["ok"] is True
+
+    missing = _call(
+        partsmith_url, "partsmith_check_fit", {"name_a": "ci-fit-a", "name_b": "nope"}, 6
+    )
+    assert "error" in missing
+
+
+def test_get_design_via_mcp(partsmith_url):
+    """v0.4.0: partsmith_get_design returns saved source without executing it."""
+    assert _initialize(partsmith_url).status_code == 200
+    code = "from build123d import *\nresult = Box(7, 7, 7)"
+    _call(partsmith_url, "partsmith_save_design", {"name": "ci-get-src", "code": code}, 2)
+    got = _call(partsmith_url, "partsmith_get_design", {"name": "ci-get-src"}, 3)
+    assert got.get("code") == code, got
+    assert got["metadata"]["version"] >= 1
+    assert "error" in _call(partsmith_url, "partsmith_get_design", {"name": "ci-no-such"}, 4)
+    _call(partsmith_url, "partsmith_delete_design", {"name": "ci-get-src"}, 5)
