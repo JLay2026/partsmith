@@ -131,7 +131,7 @@ def _safe_write(path: Path, data: bytes, context: str) -> None:
         )
 
 
-# ── Middleware ───────────────────────────────────────────────────
+# ── Middleware ───────────────────────────────────────────
 
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
     """Reject requests whose Content-Length exceeds MAX_REQUEST_BYTES."""
@@ -158,7 +158,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# ── App initialization ──────────────────────────────────────────────
+# ── App initialization ──────────────────────────────────
 
 engine = CADEngine(workspace=WORKSPACE)
 store = DesignStore(workspace=WORKSPACE)
@@ -184,7 +184,7 @@ app = FastAPI(title="partsmith", version=__version__, lifespan=_lifespan)
 app.add_middleware(BodySizeLimitMiddleware)
 
 
-# ── Request schemas ─────────────────────────────────────────────────
+# ── Request schemas ─────────────────────────────────────
 
 class CreateModelRequest(BaseModel):
     code: str = Field(..., max_length=MAX_REQUEST_BYTES)
@@ -257,7 +257,7 @@ class SaveDesignRequest(BaseModel):
     version: Union[int, str] = Field(default="auto")
 
 
-# ── Health ───────────────────────────────────────────────────────
+# ── Health ───────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -418,7 +418,7 @@ def render_all_endpoint(req: RenderRequest):
     return out
 
 
-# ── Export ─────────────────────────────────────────────────────────
+# ── Export ───────────────────────────────────────────────────
 
 @app.post("/export")
 def export_model(req: ExportRequest):
@@ -465,7 +465,7 @@ def export_plate_endpoint(req: PlateExportRequest):
     )
 
 
-# ── Printability ──────────────────────────────────────────────────
+# ── Printability ─────────────────────────────────────────────
 
 @app.post("/analyze/printability")
 def analyze_printability_endpoint(req: PrintabilityRequest):
