@@ -28,6 +28,9 @@ no authentication itself — the perimeter is the security boundary (see
 - **Validate** printability: watertight / manifold / minimum-dimension
   checks, plus a **build-volume fit check** against your printer's bed
   (v0.4.0), before you ever open a slicer.
+- **Check mating parts** (v0.4.0): interference and clearance between
+  two models — does the hole land on the boss, does the peg fit the
+  socket — before printing either one.
 - **Persist + version** designs to disk: every save is a new version,
   with a `diff` that reports source changes + geometry deltas (volume,
   surface area, bounding box) between any two versions.
@@ -102,7 +105,7 @@ directly — no shim process.
 | Transport | `streamable-http` |
 | Auth | Whatever your reverse proxy enforces (send headers via the client's Headers field) |
 
-On connect, the client sees the full `partsmith_*` tool surface (18
+On connect, the client sees the full `partsmith_*` tool surface (20
 tools as of v0.4.0).
 
 **Naming tip for agents:** use one stable name per part and re-save it
@@ -175,6 +178,7 @@ designs/bracket/
 | `/render/all` | POST | Render every standard view to disk | v0.1 |
 | `/export` | POST | Export STL / STEP / 3MF as binary | v0.1 |
 | `/analyze/printability` | POST | Watertight / manifold / min-dimension + bed-fit check (`bed_mm` override) | v0.1 (bed-fit v0.4.0) |
+| `/analyze/fit` | POST | Interference + clearance between two models (`name_a`, `name_b`, `min_clearance_mm`, `offset_b`) | v0.4.0 |
 | `/workspace/{filename}` | GET | Stream a previously-exported file (MCP large-file fallback) | v0.2 |
 | `/design/save` | POST | Save a design version (also executes as a model) | v0.2.4 |
 | `/design/list` | GET | List saved designs (latest of each) | v0.2.4 |
@@ -202,8 +206,10 @@ All prefixed `partsmith_` to avoid collisions in multi-server setups.
 | `partsmith_render_drawing` | Dimensioned engineering drawing + title block | v0.3.4 |
 | `partsmith_export` | Export STL / STEP / 3MF | v0.2 |
 | `partsmith_analyze_printability` | Watertight / manifold / min-dimension + **bed-fit** check | v0.2 (bed-fit v0.4.0) |
+| `partsmith_check_fit` | Interference + clearance between two models | v0.4.0 |
 | `partsmith_save_design` | Save a design version | v0.2.4 |
 | `partsmith_load_design` | Load + execute a saved design | v0.2.4 |
+| `partsmith_get_design` | Read a saved design's source (no execution) | v0.4.0 |
 | `partsmith_list_designs` | List saved designs | v0.2.4 |
 | `partsmith_delete_design` | Delete a design / version | v0.2.4 |
 | `partsmith_list_versions` | List a design's versions | v0.2.7 |
