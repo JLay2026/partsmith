@@ -25,6 +25,8 @@ v0.4.0: build-volume fit in analyze_printability (bed_fit); save_design
                    partsmith_check_fit (issue #25): interference +
                    clearance between two models. partsmith_get_design:
                    read saved source (parity with REST GET /design/{name}).
+                   partsmith_export_plate (issue #26): several models in
+                   one standard 3MF plate, laid out side by side.
 """
 from __future__ import annotations
 
@@ -373,6 +375,70 @@ def build_mcp(
             "3mf": "model/3mf",
         }[format]
         return _file_response(data, path.name, content_type)
+
+    @mcp.tool()
+    def partsmith_export_plate(
+        names: list[str],
+        layout: str = "arrange",
+        gap_mm: float = 5.0,
+        bed_mm: Optional[list[float]] = None,
+    ) -> dict:
+        """v0.4.0: export several loaded models as ONE standard 3MF plate.
+
+        Each model becomes a separate, named object -- the slicer
+        (Bambu Studio, OrcaSlicer, ...) imports them as separate parts on
+        one plate, and you assign filaments there. No slicer-specific
+        settings are written.
+
+        layout:
+            "arrange" (default): lay parts out side by side for printing
+                -- each dropped to the bed, placed left to right in the
+                order given with ``gap_mm`` between them, wrapping to new
+                rows; the layout is centered on the bed. Nothing is
+                rotated. Use this for mating parts too: they're usually
+                modeled in assembly positions, which is where they can't
+                be printed (check their fit with partsmith_check_fit).
+            "as_modeled": keep modeled positions as one rigid group
+                centered on the bed; rejected if any parts overlap.
+
+        Errors (instead of writing a file) if a part or the layout doesn't
+        fit the bed -- split the parts across more than one call.
+
+        Returns the file-delivery dict (same contract as partsmith_export:
+        verify sha256 + size_bytes; url_path fallback) plus ``plate``:
+        layout, bed_mm, layout_size_mm, placements [{name, offset_mm,
+        bbox_min_mm, bbox_max_mm}].
+
+        Args:
+            names: Loaded models to place, 1-16, in layout order.
+            layout: "arrange" (default) or "as_modeled".
+            gap_mm: Spacing between arranged parts (default 5).
+            bed_mm: [x, y, z] override; default PARTSMITH_BED_MM or X1C.
+        """
+        if bed_mm is not None and (
+            len(bed_mm) != 3 or any(b <= 0 for b in bed_mm)
+        ):
+            return {"error": "bed_mm must be [x, y, z] in mm, each > 0"}
+        try:
+            path, info = engine.export_plate(
+                names, bed_mm=bed_mm, layout=layout, gap_mm=gap_mm,
+            )
+        except ValueError as e:
+            return {"error": str(e)}
+        except OSError as e:
+            return {
+                "error": (
+                    f"Export write failed: {e}. Check that {workspace_dir} "
+                    "is writable by uid 1000."
+                )
+            }
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            return {"error": f"Export read-back failed: {e}"}
+        out = _file_response(data, path.name, "model/3mf")
+        out["plate"] = info
+        return out
 
     @mcp.tool()
     def partsmith_analyze_printability(
