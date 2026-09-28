@@ -135,5 +135,5 @@ def test_mcp_tools_list_includes_expected_surface(partsmith_url):
     assert "partsmith_render_drawing" in tool_names, (
         "Missing v0.3.4 partsmith_render_drawing"
     )
-    for tool in ("partsmith_check_fit", "partsmith_get_design"):
+    for tool in ("partsmith_check_fit", "partsmith_get_design", "partsmith_export_plate"):
         assert tool in tool_names, f"Missing v0.4.0 {tool}"

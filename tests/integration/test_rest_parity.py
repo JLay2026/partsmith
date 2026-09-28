@@ -82,3 +82,31 @@ def test_rest_analyze_fit_matches_mcp_shape(partsmith_url):
     assert _post(partsmith_url, "/analyze/fit", {**body, "min_clearance_mm": -1}).status_code == 422
     missing = _post(partsmith_url, "/analyze/fit", {"name_a": "ci-rest-fit-a", "name_b": "nope"})
     assert missing.status_code == 404
+
+
+def test_rest_export_plate(partsmith_url):
+    """v0.4.0 (#26): POST /export/plate returns a 3MF + placement header."""
+    import io
+    import json
+    import zipfile
+
+    for name, code in (
+        ("ci-rest-plate-a", "from build123d import *\nresult = Box(40, 20, 10)"),
+        ("ci-rest-plate-b", "from build123d import *\nresult = Box(40, 20, 10)"),
+    ):
+        r = _post(partsmith_url, "/model/create", {"name": name, "code": code})
+        assert r.status_code == 200 and r.json().get("success") is True, r.text[:300]
+
+    names = ["ci-rest-plate-a", "ci-rest-plate-b"]
+    r = _post(partsmith_url, "/export/plate", {"names": names})
+    assert r.status_code == 200, r.text[:300]
+    assert zipfile.is_zipfile(io.BytesIO(r.content))
+    info = json.loads(r.headers["X-Partsmith-Plate"])
+    assert [p["name"] for p in info["placements"]] == names
+    assert info["layout"] == "arrange"
+
+    bad_layout = _post(partsmith_url, "/export/plate", {"names": names, "layout": "grid"})
+    assert bad_layout.status_code == 422
+    assert _post(partsmith_url, "/export/plate", {"names": []}).status_code == 422
+    missing = _post(partsmith_url, "/export/plate", {"names": ["ci-rest-plate-a", "nope"]})
+    assert missing.status_code == 400
