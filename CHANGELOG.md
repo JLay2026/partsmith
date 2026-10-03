@@ -4,12 +4,13 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
-## [0.4.0] — Unreleased
+## [0.4.0] — 2026-10-03
 
 Folds in the never-tagged 0.3.7 work (merged in #24) plus release
-hardening (#28), then Theme 3 features. Still to land before the tag:
-the cookbook (#4). The keystone helper (#27) was dropped for lack of a
-second real use.
+hardening (#28), then Theme 3 features (#25, #26). The cookbook (#4)
+moves to 0.4.1: it adds examples only and changes no server behavior,
+so it doesn't hold the deploy. The keystone helper (#27) was dropped
+for lack of a second real use.
 
 ### Added
 - **Multi-part plate export** (#26) — `partsmith_export_plate` (MCP) +
@@ -87,7 +88,7 @@ second real use.
 - `partsmith_create_model` / `partsmith_save_design` docstrings tell the
   calling agent to use one stable name per part and let
   `version="auto"` number iterations.
-- README: tool count/version drift fixed (18 tools),
+- README: tool count/version drift fixed (21 tools),
   `partsmith_render_drawing` + `POST /render/drawing` added to the
   tables, "wall-thickness check" reworded (the check compares the
   smallest *bounding-box* dimension, not local wall thickness),
