@@ -67,7 +67,7 @@ ocpsvg==0.7.0
 packaging==26.3
 parso==0.8.7
 pexpect==4.9.0
-pillow==12.2.0
+pillow==12.3.0
 platformdirs==4.12.1
 prompt-toolkit==3.0.53
 psutil==7.2.2

@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: 2026 JLay2026
 # SPDX-License-Identifier: MIT
 
-FROM python:3.11-slim-bookworm
+# Debian 13 (trixie): the bookworm base carried unfixed critical CVEs
+# (perl, glibc, sqlite, glib, libxml2) that fail the deploy-side grype gate.
+FROM python:3.11-slim-trixie
 
 # OpenCascade Python wheel (OCP) + matplotlib font rendering need these
 # system libraries. Kept minimal vs other build123d-wrapper images.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
-        libglib2.0-0 \
+        libglib2.0-0t64 \
         libsm6 \
         libxext6 \
         libxrender1 \
@@ -29,7 +31,10 @@ WORKDIR /app
 COPY pyproject.toml constraints.txt ./
 COPY src/ ./src/
 # v0.4.0: install against the locked, tested dependency set.
-RUN pip install --no-cache-dir -c constraints.txt .
+# Then drop the packaging toolchain: nothing imports it at runtime, and it
+# is where grype finds wheel and setuptools' vendored jaraco packages.
+RUN pip install --no-cache-dir -c constraints.txt . \
+    && python -m pip uninstall -y setuptools wheel pip
 
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
