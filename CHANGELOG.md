@@ -4,6 +4,27 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.4.1] — 2026-10-04
+
+Security rebuild. No server behavior changes.
+
+### Changed
+- **Base image: `python:3.11-slim-bookworm` → `python:3.11-slim-trixie`**
+  (Debian 13). The bookworm base carried ten critical CVEs with no
+  Debian fix (perl, glibc, sqlite, glib, libxml2) that fail the grype
+  gate partsmith is deployed behind (mcp-factory-host, 2026-10-04 scan).
+  `libglib2.0-0` is `libglib2.0-0t64` on trixie.
+- **The image no longer ships pip, setuptools or wheel.** They are only
+  needed to install, and they carried the `wheel` and setuptools-vendored
+  `jaraco-context` advisories.
+
+### Known
+- Pillow stays at 12.2.0: build123d's `threejs-materials` dependency pins
+  `pillow<12.3.0`. Bumped when upstream allows it.
+
+### Removed from plan
+- The cookbook (#4) is closed as no longer planned.
+
 ## [0.4.0] — 2026-10-03
 
 Folds in the never-tagged 0.3.7 work (merged in #24) plus release

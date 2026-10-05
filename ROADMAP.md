@@ -4,8 +4,9 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-10-03 (v0.4.0 released from main; the cookbook
-(#4) moved to v0.4.1 so it doesn't hold the deploy. 2026-09-28: 0.3.7
+**Last updated:** 2026-10-04 (v0.4.1 security rebuild released: Debian 13
+base, no packaging toolchain in the image. The cookbook (#4) is closed as
+no longer planned. 2026-10-03: v0.4.0 released from main. 2026-09-28: 0.3.7
 was never tagged; its work folds into **v0.4.0** with release
 hardening — dependency lock file, REST/MCP parity fixes. Real usage Jun–Sep (rug_hanger, vise_hanger v2–v8,
 mms_mount v3–v6, sw2 rack tray/wing/bar) showed what hurts: bed fit,
@@ -19,9 +20,9 @@ of #14; pre-slice time/material/overhang analysis stays in backlog.)
 
 | Theme | State |
 |---|---|
-| Theme 1 — Author ergonomics | ✅ Effectively complete (#1, #2, #3 shipped; #4 → v0.4.1) |
+| Theme 1 — Author ergonomics | ✅ Complete (#1, #2, #3 shipped; #4 cookbook closed, not planned) |
 | Theme 2 — Output fidelity      | 🟡 Paused (cross-section v0.2.6 + fill/deltas v0.3.3 + drawings v0.3.4 shipped; #14 review renderer → v0.5.0) |
-| Theme 3 — Print workflow       | 🟡 In progress (bed-fit, assembly fit check, multi-part plate 3MF shipped v0.4.0; cookbook → v0.4.1) |
+| Theme 3 — Print workflow       | 🟡 Core shipped (bed-fit, assembly fit check, multi-part plate 3MF in v0.4.0); pre-slice analysis in backlog, Bambu Connect v0.6+ |
 | Theme 4 — Validated quality | ✅ Complete (#5 integration suite v0.3.1+v0.3.2; #18 verifiable delivery v0.3.5; #20 opt-in preview v0.3.6; locked deps + REST parity tests v0.4.0) |
 | Theme 5 — Operational (deploy) | ✅ ZimaOS Custom Install live; nut/ retrofit backlog |
 
@@ -54,8 +55,8 @@ of #14; pre-slice time/material/overhang analysis stays in backlog.)
   Sept 2026 mcp 2.x break).
 - **Earn the feature with real demand.** New patterns (helpers,
   cookbook entries) get added when a real design has demanded them
-  twice, not on speculation. See the cookbook (#4) deferral and the
-  drawing feature-callout deferral (v0.3.4).
+  twice, not on speculation. See the cookbook (#4, closed 2026-10-04 as
+  not planned) and the drawing feature-callout deferral (v0.3.4).
 
 ---
 
@@ -63,15 +64,16 @@ of #14; pre-slice time/material/overhang analysis stays in backlog.)
 
 You'll spend 80% of partsmith time writing build123d code. Anything
 that compresses repeated patterns has outsized payoff. **This theme is
-effectively complete** — the three shipped items cover the core
-blank-page + iteration pain.
+complete** — the three shipped items cover the core
+blank-page + iteration pain. The cookbook (#4) was closed as not planned
+on 2026-10-04.
 
 | Issue | Item | Status |
 |---|---|---|
 | [#1](https://github.com/JLay2026/partsmith/issues/1) | `partsmith_helpers` library (through_hole, screw_hole, hex_hole, slot, chamfer_edges, fillet_top_edges, screw_pattern) | ✅ Shipped v0.2.5 |
 | [#2](https://github.com/JLay2026/partsmith/issues/2) | Persistent design store — save/load build123d source to disk; survives container restart | ✅ Shipped v0.2.4 |
 | [#3](https://github.com/JLay2026/partsmith/issues/3) | Versioned designs + `partsmith_diff_designs(name, v1, v2)` | ✅ Shipped v0.2.7 |
-| [#4](https://github.com/JLay2026/partsmith/issues/4) | Cookbook — `examples/` dir with starter designs | 🟡 **Gate opened** — three real wall-mount/hanger designs exist; seed from them in v0.4.1 |
+| [#4](https://github.com/JLay2026/partsmith/issues/4) | Cookbook — `examples/` dir with starter designs | ⛔ Closed 2026-10-04 — no longer planned |
 | [#27](https://github.com/JLay2026/partsmith/issues/27) | `keystone_slot(...)` helper (keyhole/keystone hanging slot) | ❌ Dropped 2026-09-28 — one real use (vise_hanger v6–v8); mms_mount uses plain countersunk holes. Reopen on a second use |
 
 ---
@@ -120,8 +122,7 @@ parts and exporting several bodies per plate are earned.
 | Optional: Bambu Connect / MQTT integration | Skip Bambu Studio for repeat prints | XL (out-of-tree candidate) | ⬜ v0.6+ / out-of-tree |
 
 **Target release:** v0.4.0 (bed-fit + clearance check + plate 3MF,
-shipped); cookbook v0.4.1; Bambu Connect deferred to v0.6+ or
-out-of-tree plugin.
+shipped); Bambu Connect deferred to v0.6+ or out-of-tree plugin.
 
 ---
 
@@ -198,8 +199,9 @@ v0.4.0  ✅ bed-fit check; versioned-name warning (REST + MCP);
           #25 assembly fit check; partsmith_get_design (parity);
           #26 multi-part plate 3MF (+ 3MF-was-STL fix)
           (keystone helper #27 dropped)
+v0.4.1  ✅ security rebuild — Debian 13 (trixie) base; pip/setuptools/
+          wheel removed from the image (cookbook #4 closed, not planned)
 ---- you are here ----
-v0.4.1  — #4 cookbook seeded from real designs
 v0.5.0  — Theme 2 #14 review-grade renderer (diagnostics JSON, contact
           sheet, matplotlib legibility; PyVista gate intact)
 v0.6+   — Bambu Connect or whatever real workloads surface
