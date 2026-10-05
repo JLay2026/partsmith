@@ -4,7 +4,8 @@ Strategic direction for [JLay2026/partsmith](https://github.com/JLay2026/partsmi
 For past releases see [`CHANGELOG.md`](CHANGELOG.md). For tactical work in
 flight see [the issues tracker](https://github.com/JLay2026/partsmith/issues).
 
-**Last updated:** 2026-10-04 (v0.4.1 security rebuild released: Debian 13
+**Last updated:** 2026-10-05 (v0.4.2: the image applies Debian security
+updates at build time. 2026-10-04: v0.4.1 security rebuild released: Debian 13
 base, no packaging toolchain in the image. The cookbook (#4) is closed as
 no longer planned. 2026-10-03: v0.4.0 released from main. 2026-09-28: 0.3.7
 was never tagged; its work folds into **v0.4.0** with release
@@ -201,6 +202,8 @@ v0.4.0  ✅ bed-fit check; versioned-name warning (REST + MCP);
           (keystone helper #27 dropped)
 v0.4.1  ✅ security rebuild — Debian 13 (trixie) base; pip/setuptools/
           wheel removed from the image (cookbook #4 closed, not planned)
+v0.4.2  ✅ security rebuild — Debian security updates applied at build
+          time (libpcre2 fix)
 ---- you are here ----
 v0.5.0  — Theme 2 #14 review-grade renderer (diagnostics JSON, contact
           sheet, matplotlib legibility; PyVista gate intact)
