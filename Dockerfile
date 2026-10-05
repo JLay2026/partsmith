@@ -7,7 +7,10 @@ FROM python:3.11-slim-trixie
 
 # OpenCascade Python wheel (OCP) + matplotlib font rendering need these
 # system libraries. Kept minimal vs other build123d-wrapper images.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` applies Debian security fixes the upstream python image
+# hasn't been rebuilt with yet (v0.4.2: libpcre2 deb13u3).
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0t64 \
         libsm6 \

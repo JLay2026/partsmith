@@ -4,6 +4,22 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.4.2] — 2026-10-05
+
+Security rebuild. No server behavior changes.
+
+### Changed
+- **The image applies Debian security updates at build time**
+  (`apt-get upgrade` in the Dockerfile). The 0.4.1 image carried
+  libpcre2 `10.46-1~deb13u2` (CVE-2026-103111, high) because the upstream
+  `python:3.11-slim-trixie` image hadn't been rebuilt with the
+  `deb13u3` fix. Builds now pick up such fixes without waiting for
+  upstream; the Python dependency set stays locked by `constraints.txt`.
+
+### Known
+- libxml2 CVE-2026-6653 (critical) has no Debian fix yet.
+- Pillow stays at 12.2.0 (see 0.4.1).
+
 ## [0.4.1] — 2026-10-04
 
 Security rebuild. No server behavior changes.
