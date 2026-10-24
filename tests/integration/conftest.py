@@ -9,7 +9,7 @@ starts it on ``127.0.0.1:8123``, and sets ``PARTSMITH_URL``.
 Locally, run something like::
 
     docker run -d --rm -p 127.0.0.1:8123:8123 \\
-      --name partsmith-test ghcr.io/jlay2026/partsmith:latest
+      --name partsmith-test ghcr.io/jlay2026/partsmith:0.4.3
     PARTSMITH_URL=http://127.0.0.1:8123 pytest tests/integration/ -v
     docker stop partsmith-test
 """

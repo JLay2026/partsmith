@@ -1,14 +1,15 @@
 ---
 # Integration tests against a real partsmith container.
 #
-# Builds the image from the current branch, starts it, waits for
-# /health, then runs tests/integration/ with PARTSMITH_URL pointing
-# at the loopback port.
+# Builds the image from the current commit with the runner's own Docker,
+# starts it, waits for /health, then runs tests/integration/ with
+# PARTSMITH_URL pointing at the loopback port.
 #
 # Existence of this workflow is the v0.3.1 deliverable per ROADMAP
 # Theme 4. Catches the kind of regressions that bit v0.2.0 -> v0.2.3
 # (MCP lifespan, double-prefix path, scheme downgrade, DNS rebinding)
-# in CI rather than in production.
+# in CI rather than in production. Since 0.4.3 release.yml calls it
+# before publishing, so a tag ships only an image this suite passed.
 
 name: Integration
 
@@ -17,25 +18,27 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   integration:
     name: Container roundtrip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build partsmith image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: partsmith:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: docker build -t partsmith:test .
 
       - name: Start partsmith container
         run: |
@@ -56,10 +59,14 @@ jobs:
           docker logs partsmith
           exit 1
 
-      - uses: actions/setup-python@v5
+      - name: The image reports the packaged version
+        run: |
+          want="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/__init__.py)"
+          curl -fsS http://127.0.0.1:8123/health | grep -q "\"version\":\"$want\""
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.11'
-          cache: pip
 
       - name: Install integration test deps
         run: pip install pytest requests

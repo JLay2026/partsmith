@@ -3,12 +3,20 @@
 
 # Debian 13 (trixie): the bookworm base carried unfixed critical CVEs
 # (perl, glibc, sqlite, glib, libxml2) that fail the deploy-side grype gate.
-FROM python:3.11-slim-trixie
+#
+# Pinned by index digest (JLay2026 base-image policy; the tag beside it is
+# for people). The official image rather than a Docker Hardened Image: the
+# OCP wheel and matplotlib need the Debian libraries installed below, and
+# the hardened runtime has no package manager. Bump tag and digest
+# together: `docker buildx imagetools inspect python:3.11-slim-trixie`.
+# 3.11.17, built 2026-10-21.
+FROM python:3.11-slim-trixie@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377
 
 # OpenCascade Python wheel (OCP) + matplotlib font rendering need these
 # system libraries. Kept minimal vs other build123d-wrapper images.
 # `apt-get upgrade` applies Debian security fixes the upstream python image
-# hasn't been rebuilt with yet (v0.4.2: libpcre2 deb13u3).
+# hasn't been rebuilt with yet (v0.4.2: libpcre2 deb13u3; v0.4.3: libexpat1
+# 2.9.0-1~deb13u1).
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         libgl1 \

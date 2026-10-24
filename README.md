@@ -54,7 +54,17 @@ step).
 
 ### Option B — `docker run` from the published image
 
-The image is published to GHCR on every release:
+Every `vX.Y.Z` tag publishes `ghcr.io/jlay2026/partsmith:X.Y.Z` (linux/amd64),
+signed keyless with cosign (GitHub OIDC) and carrying a signed SPDX SBOM
+attestation. There is no `latest` tag since 0.4.3: pin a version, or a
+version and digest. Verify a pull with
+
+```bash
+cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/JLay2026/partsmith/\.github/workflows/release\.yml@refs/tags/v' \
+  ghcr.io/jlay2026/partsmith:0.4.3
+```
+
 
 ```bash
 # Pre-create bind-mount dirs as uid 1000 (the container's user).
@@ -66,14 +76,13 @@ docker run -d --name partsmith \
   -p 127.0.0.1:8123:8123 \
   -v /srv/partsmith/workspace:/workspace \
   -v /srv/partsmith/renders:/renders \
-  ghcr.io/jlay2026/partsmith:latest
+  ghcr.io/jlay2026/partsmith:0.4.3
 
 curl http://127.0.0.1:8123/health
-# {"status":"ok","version":"0.4.0"}
+# {"status":"ok","version":"0.4.3"}
 ```
 
-Pin a specific version with `:0.4.0` instead of `:latest`. Available
-tags: <https://github.com/JLay2026/partsmith/pkgs/container/partsmith>.
+Available tags: <https://github.com/JLay2026/partsmith/pkgs/container/partsmith>.
 
 ### Option C — local dev (build from source)
 
@@ -272,7 +281,7 @@ Two GitHub Actions workflows run on every PR + push to main:
 
   ```bash
   docker run -d --rm -p 127.0.0.1:8123:8123 --name p-test \
-    ghcr.io/jlay2026/partsmith:latest
+    ghcr.io/jlay2026/partsmith:0.4.3
   PARTSMITH_URL=http://127.0.0.1:8123 pytest tests/integration/ -v
   docker stop p-test
   ```

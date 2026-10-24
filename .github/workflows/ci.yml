@@ -1,36 +1,51 @@
 ---
 name: CI
 
+# Every action is pinned by commit SHA (JLay2026 standard, 0.4.3). ruff comes
+# from the shared JLay2026/.github hash-pinned tools lock. release.yml calls
+# this workflow (and integration.yml) before it publishes anything, so a tag
+# ships only what passed here.
+
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
     name: ruff
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          python-version: '3.11'
-          cache: pip
-      - name: Install ruff
-        run: pip install ruff
-      - name: Lint
-        run: ruff check src/ tests/
+          persist-credentials: false
+      - id: tools
+        uses: JLay2026/.github/actions/python-tools@59ea76cf3c476d8ef1cabf39919626900f0102ff  # v1.0.1
+      - env:
+          BIN: ${{ steps.tools.outputs.bin }}
+        run: '"$BIN/ruff" check --output-format=github src/ tests/'
 
   pytest:
     name: pytest (lightweight)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.11'
-          cache: pip
       - name: Install minimal test deps
         # Only stdlib + pytest + fastapi/pydantic for the REST schema test.
         # Tests that need build123d / trimesh / matplotlib run in the
@@ -40,5 +55,5 @@ jobs:
         # tests/test_versioning.py is pure stdlib + tmp_path filesystem;
         # tests/integration/* runs in integration.yml.
         # test_helpers + test_section + test_smoke need build123d at runtime;
-        # they're covered by the integration suite (or future v0.3.2 expansion).
+        # they're covered by the integration suite.
         run: pytest tests/test_versioning.py tests/test_bed_fit.py -v --tb=short
