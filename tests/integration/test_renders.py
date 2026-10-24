@@ -38,8 +38,13 @@ def _render(partsmith_url, tool, args, req_id) -> bytes:
     return png
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def part(partsmith_url):
+    """A loaded model with an internal pocket, so every view has detail.
+
+    Function-scoped: partsmith_url is, and re-creating the model costs a
+    few tens of milliseconds.
+    """
     assert _initialize(partsmith_url).status_code == 200
     name = "ci-render-bracket"
     code = (
