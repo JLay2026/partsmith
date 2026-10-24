@@ -4,6 +4,67 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.4.3] — 2026-10-24
+
+Security release and release-process hardening. No server behavior
+changes.
+
+### Changed
+- **Pillow 12.2.0 → 13.0.0** and **certifi 2026.7.22 → 2026.10.23.**
+  Pillow 12.2.0 carried 4 critical and 23 high advisories (JPEG and
+  TIFF decoder overflows among them; all fixed in 13.0.0); certifi
+  2026.7.22 carried GHSA-6q48-6c7w-9gw2. Pillow is on a live path: every
+  render is encoded through matplotlib's Agg backend into it. The
+  `threejs-materials` cap that held Pillow at 12.2.0 (see 0.4.1) is gone
+  in 1.2.5. Pillow 13's removals (`Image._show`, `fromarray` mode changes
+  that alter dtype, I-mode PNG clipping, `get_child_images` on `Image`)
+  touch nothing partsmith or its render stack uses; all five render paths
+  were run against it with deprecation warnings promoted to errors.
+- **The whole locked set is refreshed** (`constraints.txt`, 33 packages),
+  rather than the two advisories alone: fastapi 0.162.0 / starlette
+  1.9.0 / pydantic 2.14.1, trimesh 5.2.0, the OCP wheels 8.0.1.1.0,
+  python-dateutil 3.0.0. build123d 0.13.0, matplotlib 3.11.2, numpy
+  2.4.6 and mcp 1.30.0 are unchanged. The header's regenerate command
+  now says `--upgrade`; without it uv keeps every existing pin.
+- **Base image pinned by index digest**
+  (`python:3.11-slim-trixie@sha256:b7a9e5f6…`, 3.11.17, 2026-10-21) per
+  the JLay2026 base-image policy. The official image rather than a Docker
+  Hardened Image: the OCP wheel and matplotlib need Debian libraries and
+  the hardened runtime has no package manager. `apt-get upgrade` stays
+  and now picks up libexpat1 2.9.0-1~deb13u1 (five advisories on
+  2.8.3-1~deb13u1).
+- **Releases are signed and attested.** `release.yml` runs only on
+  `v*.*.*` tags, refuses a tag that isn't on `main` or doesn't match
+  `src/__init__.py` and `pyproject.toml`, runs CI and the container
+  integration suite first, builds with the runner's own Docker, pushes
+  `ghcr.io/jlay2026/partsmith:X.Y.Z`, signs it keyless with cosign
+  (GitHub OIDC), attaches a signed SPDX SBOM attestation (syft 1.54.1)
+  and verifies both before printing the `name:version@digest` pin.
+  No more `latest`, `main` or `sha-` tags and no push-to-main builds.
+  Consumers pin `X.Y.Z@digest` and verify against
+  `release.yml@refs/tags/v*`; the README shows the command.
+- **Every GitHub Action is pinned by commit SHA** across the three
+  workflows; ruff comes from the shared JLay2026/.github hash-pinned
+  tools lock; checkouts don't persist credentials; buildx and the GHA
+  layer cache are gone (the image builds in under the timeout without
+  them, and a cache is one more input to a signed artifact).
+- README: no `latest` references; the 0.4.3 health response.
+
+### Added
+- `tests/integration/test_renders.py`: `render_3d` (four views),
+  `render_2d` (four views, with and without dimensions) and
+  `render_multiview` through MCP, each PNG decoded (IHDR size checked)
+  and verified against its `sha256` / `size_bytes`. With the existing
+  section and drawing tests every render path now runs in CI.
+- `integration.yml` asserts the container's `/health` reports the
+  packaged `__version__`.
+
+### Known
+- libxml2 CVE-2026-6653 (critical) still has no Debian fix.
+- The lightweight CI job and the integration runner still `pip install`
+  their test tools unpinned; a hash-pinned dev lock and the template's
+  pip-audit / zizmor / gitleaks jobs are 0.5.0 work (#14).
+
 ## [0.4.2] — 2026-10-05
 
 Security rebuild. No server behavior changes.
