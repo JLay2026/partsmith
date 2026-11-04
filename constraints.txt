@@ -8,10 +8,11 @@
 # file pins the exact, tested set the Dockerfile installs, so every
 # image build is reproducible and upgrades happen on purpose.
 #
-# Resolved for the image's platform: CPython 3.11, linux x86_64.
+# Resolved for the image's platform: CPython 3.12, linux x86_64 (3.11
+# until 0.4.4; the 3.12 resolve kept every pin).
 # Regenerate (then run unit + integration tests before committing):
 #
-#   uv pip compile pyproject.toml --python-version 3.11 \
+#   uv pip compile pyproject.toml --python-version 3.12 \
 #     --python-platform x86_64-manylinux_2_28 \
 #     --no-header --no-annotate -o constraints.txt --upgrade
 #   # re-add this header
