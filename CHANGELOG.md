@@ -4,6 +4,20 @@ All notable changes to [JLay2026/partsmith](https://github.com/JLay2026/partsmit
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [0.4.4] — 2026-11-04
+
+Security release: the base image only. No server behavior or dependency
+changes.
+
+### Changed
+- **Base image: Python 3.11.17 → 3.11.18**
+  (`python:3.11-slim-trixie@sha256:db20d850…`, built 2026-10-28). 3.11.17
+  carries CVE-2026-115557 (critical, CPython), which fails
+  mcp-factory-host's image gate (weekly scan, 2026-11-02). The locked set
+  (`constraints.txt`) is unchanged: same minor version, same wheels.
+  `apt-get upgrade` stays and picks up any Debian fixes since 0.4.3,
+  including libxml2 CVE-2026-6653 if Debian has shipped it.
+
 ## [0.4.3] — 2026-10-24
 
 Security release and release-process hardening. No server behavior

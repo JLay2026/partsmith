@@ -9,8 +9,8 @@
 # OCP wheel and matplotlib need the Debian libraries installed below, and
 # the hardened runtime has no package manager. Bump tag and digest
 # together: `docker buildx imagetools inspect python:3.11-slim-trixie`.
-# 3.11.17, built 2026-10-21.
-FROM python:3.11-slim-trixie@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377
+# 3.11.18, built 2026-10-28 (v0.4.4: CVE-2026-115557 in 3.11.17).
+FROM python:3.11-slim-trixie@sha256:db20d8506e2f15b6db39b40b6015ca46bae855dec6dd326d462cfe79ae972893
 
 # OpenCascade Python wheel (OCP) + matplotlib font rendering need these
 # system libraries. Kept minimal vs other build123d-wrapper images.
