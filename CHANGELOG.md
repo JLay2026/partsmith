@@ -6,17 +6,34 @@ this project follows semver-ish conventions (see [`ROADMAP.md`](ROADMAP.md)).
 
 ## [0.4.4] — 2026-11-04
 
-Security release: the base image only. No server behavior or dependency
-changes.
+Security release. The image moves to Python 3.12; no server behavior or
+dependency changes.
 
 ### Changed
-- **Base image: Python 3.11.17 → 3.11.18**
-  (`python:3.11-slim-trixie@sha256:db20d850…`, built 2026-10-28). 3.11.17
-  carries CVE-2026-115557 (critical, CPython), which fails
-  mcp-factory-host's image gate (weekly scan, 2026-11-02). The locked set
-  (`constraints.txt`) is unchanged: same minor version, same wheels.
-  `apt-get upgrade` stays and picks up any Debian fixes since 0.4.3,
+- **Base image: `python:3.11-slim-trixie` (3.11.17) →
+  `python:3.12-slim-trixie` (3.12.16)**, pinned by index digest
+  (`b18b261e…`, built 2026-10-28). 3.11.17 carries CVE-2026-115557
+  (critical, CPython), which fails mcp-factory-host's image gate (weekly
+  scan, 2026-11-02). Moving to 3.12 rather than 3.11.18 puts partsmith on
+  the same base as unifi-network-mcp, so one digest and one set of CPython
+  advisories cover both; 3.11's security support also ends a year
+  earlier (October 2027).
+- **`constraints.txt` resolved for CPython 3.12.** The documented
+  regenerate command, run for 3.12 without `--upgrade`, keeps all 100
+  pins unchanged: every one has a cp312 (or pure-Python) wheel for linux
+  x86_64. Only the header changes.
+- `apt-get upgrade` stays and picks up any Debian fixes since 0.4.3,
   including libxml2 CVE-2026-6653 if Debian has shipped it.
+
+### Verification
+The locked set installed on CPython 3.12: all 66 unit tests (including
+the build123d-dependent ones CI skips) pass with `DeprecationWarning` as
+an error, and the full integration suite (31 tests, every render path
+through MCP) passes against a server running on it.
+
+### Known
+- The lightweight CI job and the integration runner still host their
+  test tools on Python 3.11; the image under test is 3.12.
 
 ## [0.4.3] — 2026-10-24
 

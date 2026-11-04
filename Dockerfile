@@ -8,9 +8,10 @@
 # for people). The official image rather than a Docker Hardened Image: the
 # OCP wheel and matplotlib need the Debian libraries installed below, and
 # the hardened runtime has no package manager. Bump tag and digest
-# together: `docker buildx imagetools inspect python:3.11-slim-trixie`.
-# 3.11.18, built 2026-10-28 (v0.4.4: CVE-2026-115557 in 3.11.17).
-FROM python:3.11-slim-trixie@sha256:db20d8506e2f15b6db39b40b6015ca46bae855dec6dd326d462cfe79ae972893
+# together: `docker buildx imagetools inspect python:3.12-slim-trixie`.
+# 3.12.16, built 2026-10-28. v0.4.4: 3.11 -> 3.12 (CVE-2026-115557 in
+# 3.11.17), the same base as unifi-network-mcp.
+FROM python:3.12-slim-trixie@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
 
 # OpenCascade Python wheel (OCP) + matplotlib font rendering need these
 # system libraries. Kept minimal vs other build123d-wrapper images.
